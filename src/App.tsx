@@ -61,6 +61,21 @@ type DemoStep = {
   metric: string
 }
 
+type Source = {
+  title: string
+  kind: string
+  confidence: string
+  detail: string
+}
+
+type Answer = {
+  title: string
+  body: string
+  checks: string[]
+  confidence: string
+  sources: Source[]
+}
+
 const navItems: Array<{ label: string; icon: IconType }> = [
   { label: 'Dashboard', icon: Activity },
   { label: 'Ask', icon: MessageSquareText },
@@ -70,11 +85,25 @@ const navItems: Array<{ label: string; icon: IconType }> = [
   { label: 'Settings', icon: Settings },
 ]
 
-const sourceSeed = [
+const redisSources: Source[] = [
   { title: 'Introduced in PR #188', kind: 'pull_request', confidence: '96%', detail: 'Merged by Sarah after p95 login latency dropped from 820ms to 230ms.' },
   { title: 'Issue #142 Authentication latency', kind: 'issue', confidence: '93%', detail: 'Login bursts caused repeated PostgreSQL session lookups and queueing.' },
   { title: 'docs/adr/002-redis-adoption.md', kind: 'doc', confidence: '92%', detail: 'ADR records Redis over Memcached for persistence and rate limiting.' },
   { title: 'cache/redis_client.go', kind: 'code', confidence: '90%', detail: 'Defines connection pool, retries, timeouts, and circuit breaker behavior.' },
+]
+
+const architectureSources: Source[] = [
+  { title: 'ProjectMind product docs', kind: 'doc', confidence: '88%', detail: 'Defines architecture as the important structure, boundaries, dependencies, and tradeoffs that explain how a system is built.' },
+  { title: 'Code graph model', kind: 'graph', confidence: '84%', detail: 'The graph connects modules, calls, imports, dependencies, tests, and ownership evidence.' },
+  { title: 'Memory lifecycle', kind: 'memory', confidence: '80%', detail: 'Architecture memories should keep decisions, constraints, supersessions, and source provenance.' },
+  { title: 'Repository onboarding workflow', kind: 'workflow', confidence: '78%', detail: 'Project understanding starts by indexing source code, history, PRs, issues, docs, and extracted decisions.' },
+]
+
+const generalSources: Source[] = [
+  { title: 'Ask repository workflow', kind: 'workflow', confidence: '72%', detail: 'The prototype can answer from seeded product knowledge, memory records, graph nodes, and change records.' },
+  { title: 'Current prototype limitation', kind: 'system', confidence: '100%', detail: 'No live backend or LLM is connected in this frontend-only prototype, so unknown questions are answered transparently.' },
+  { title: 'Docs: Ask repository', kind: 'doc', confidence: '78%', detail: 'The Ask section changes strategy for architecture, history, bug, impact, decision, and dependency style questions.' },
+  { title: 'Task workbench activity', kind: 'log', confidence: '76%', detail: 'User questions and review actions are written into the visible activity log.' },
 ]
 
 const memorySeed: Memory[] = [
@@ -207,6 +236,136 @@ function scrollToSection(id: string) {
   window.setTimeout(run, 900)
 }
 
+function buildLocalAnswer(question: string, selectedGraphNode: typeof graphNodes[number]): Answer {
+  const clean = question.trim()
+  const lower = clean.toLowerCase()
+
+  if (lower.includes('architecture') || lower.includes('architectural')) {
+    return {
+      title: 'Architecture',
+      body: 'Architecture is the set of important system structures and decisions that shape how software is organized, changed, deployed, and operated. In ProjectMind, that means service boundaries, data flow, dependencies, conventions, constraints, decisions, incidents, and the reasons previous changes were made.',
+      checks: [
+        'It explains why the system is shaped a certain way, not just what each file does.',
+        'It includes code relationships, ADRs, PR history, incidents, conventions, and technical constraints.',
+        'A useful architecture answer should cite evidence and mention what may break if the structure changes.',
+      ],
+      confidence: '88%',
+      sources: architectureSources,
+    }
+  }
+
+  if (lower.includes('postgres') || lower.includes('mongo') || lower.includes('database')) {
+    return {
+      title: 'Database decision',
+      body: 'PostgreSQL is the system of record because the team needed transactional consistency, relational reporting, and simpler migration paths after an earlier MongoDB experiment was rejected.',
+      checks: [
+        'MongoDB session storage was rejected after concurrent update issues.',
+        'PostgreSQL migration was confirmed in ADR #004 and PR #421.',
+        'Current auth, billing, and reporting modules depend on relational constraints.',
+      ],
+      confidence: '86%',
+      sources: [
+        { title: 'ADR #004 PostgreSQL migration', kind: 'doc', confidence: '89%', detail: 'Records the relational database migration rationale and consistency requirements.' },
+        { title: 'PR #421 Database migration', kind: 'pull_request', confidence: '87%', detail: 'Migrated production data flows from MongoDB-oriented models to PostgreSQL tables.' },
+        { title: 'Issue #67 MongoDB session experiment', kind: 'issue', confidence: '81%', detail: 'Concurrent session updates caused consistency problems during the rejected experiment.' },
+        { title: 'billing/schema.sql', kind: 'code', confidence: '78%', detail: 'Billing and reporting depend on relational constraints and joins.' },
+      ],
+    }
+  }
+
+  if (lower.includes('break') || lower.includes('change') || lower.includes('impact')) {
+    return {
+      title: 'Impact analysis',
+      body: `${selectedGraphNode.label} has ${selectedGraphNode.risk.toLowerCase()} change risk because it touches authentication flow, rate limiting, and ${selectedGraphNode.tests} known tests.`,
+      checks: [
+        '4 controllers and 3 API endpoints are potentially affected.',
+        `${selectedGraphNode.tests} tests should run before merging.`,
+        `Review memories connected to ${selectedGraphNode.file} before changing behavior.`,
+      ],
+      confidence: '91%',
+      sources: [
+        { title: selectedGraphNode.label, kind: 'graph_node', confidence: '91%', detail: `${selectedGraphNode.file} is selected in the dependency graph.` },
+        { title: 'Impact traversal result', kind: 'graph', confidence: '88%', detail: 'The prototype graph links the selected module to auth, user, config, and rate-limit dependencies.' },
+        { title: 'Known test coverage', kind: 'test', confidence: '82%', detail: `${selectedGraphNode.tests} tests are associated with this module in the seeded graph data.` },
+        { title: 'Task workbench risk model', kind: 'workflow', confidence: '76%', detail: 'Risk is estimated from dependency count, endpoint proximity, and known test coverage.' },
+      ],
+    }
+  }
+
+  if (lower.includes('redis') || lower.includes('cache') || lower.includes('rate limit')) {
+    return {
+      title: 'Redis decision',
+      body: 'Redis is used as the primary cache and distributed rate limiter to improve response times and protect downstream services.',
+      checks: [
+        'Introduced in PR #188 to address authentication latency.',
+        'Selected over Memcached for persistence and richer data structures.',
+        'Central to session storage and rate limiting strategies.',
+      ],
+      confidence: '96%',
+      sources: redisSources,
+    }
+  }
+
+  if (lower.includes('bug') || lower.includes('error') || lower.includes('incident')) {
+    return {
+      title: 'Historical bug memory',
+      body: 'ProjectMind would search issue history, merged fixes, stack traces, incidents, and related memories to find whether the team has seen the failure before. In this prototype, the strongest seeded bug-like memory is the authentication latency issue that led to Redis adoption.',
+      checks: [
+        'Issue #142 identified authentication latency during login bursts.',
+        'PR #188 fixed the known bottleneck with Redis-backed caching.',
+        'A production version should compare stack traces and affected files before suggesting a fix.',
+      ],
+      confidence: '79%',
+      sources: redisSources,
+    }
+  }
+
+  if (lower.includes('security') || lower.includes('auth') || lower.includes('login')) {
+    return {
+      title: 'Authentication and security context',
+      body: 'The current prototype models GitHub, Google, and email authentication flows. Real OAuth redirects require client IDs, and production sessions require a backend callback so secrets and token exchange never happen in the browser.',
+      checks: [
+        'GitHub and Google buttons check for Vite OAuth client IDs before redirecting.',
+        'Email signup/signin creates only a local browser demo session.',
+        'Production needs a server-side callback, encrypted secrets, CSRF state validation, and RBAC.',
+      ],
+      confidence: '90%',
+      sources: [
+        { title: '.env.example', kind: 'config', confidence: '100%', detail: 'Lists VITE_GITHUB_CLIENT_ID and VITE_GOOGLE_CLIENT_ID for frontend OAuth launch configuration.' },
+        { title: 'Authentication docs', kind: 'doc', confidence: '86%', detail: 'Documents signup, signin, OAuth launch, and local email-session behavior.' },
+        { title: 'Auth panel implementation', kind: 'code', confidence: '84%', detail: 'OAuth buttons redirect only when configured; email flow writes a local demo session.' },
+        { title: 'Security requirement', kind: 'system', confidence: '82%', detail: 'Production OAuth code exchange belongs on the backend, not in a public frontend.' },
+      ],
+    }
+  }
+
+  if (lower.includes('dependency') || lower.includes('depends') || lower.includes('related file')) {
+    return {
+      title: 'Dependency context',
+      body: `${selectedGraphNode.label} is currently selected in the graph. The prototype shows its neighboring dependencies and uses that selection to estimate change risk, affected endpoints, and test coverage.`,
+      checks: [
+        'Click graph nodes to change the active module.',
+        'The impact panel updates risk, tests, endpoints, and the file path.',
+        'A production version would traverse imports, calls, tests, ownership, and PR history.',
+      ],
+      confidence: '84%',
+      sources: architectureSources,
+    }
+  }
+
+  return {
+    title: 'Question needs repository evidence',
+    body: `I do not have enough seeded evidence in this frontend prototype to answer "${clean}" as a factual project-memory answer. A production ProjectMind answer would retrieve matching code symbols, memories, PRs, issues, docs, graph paths, and git history before responding.`,
+    checks: [
+      'This prototype avoids inventing a confident answer when no matching evidence is available.',
+      'Try asking about architecture, Redis, database decisions, bugs, security, dependencies, or impact analysis.',
+      'Connecting a real backend/LLM and repository index would make open-ended questions answerable from live evidence.',
+    ],
+    confidence: '62%',
+    sources: generalSources,
+  }
+}
+
 function App() {
   const [question, setQuestion] = useState('Why do we use Redis?')
   const [submittedQuestion, setSubmittedQuestion] = useState('Why do we use Redis?')
@@ -254,43 +413,7 @@ function App() {
     return () => timers.forEach((timer) => window.clearTimeout(timer))
   }, [])
 
-  const answer = useMemo(() => {
-    const lower = submittedQuestion.toLowerCase()
-
-    if (lower.includes('postgres') || lower.includes('mongo')) {
-      return {
-        title: 'Database decision',
-        body: 'PostgreSQL is the system of record because the team needed transactional consistency, relational reporting, and simpler migration paths after an earlier MongoDB experiment was rejected.',
-        checks: [
-          'MongoDB session storage was rejected after concurrent update issues.',
-          'PostgreSQL migration was confirmed in ADR #004 and PR #421.',
-          'Current auth, billing, and reporting modules depend on relational constraints.',
-        ],
-      }
-    }
-
-    if (lower.includes('break') || lower.includes('change') || lower.includes('impact')) {
-      return {
-        title: 'Impact analysis',
-        body: `${selectedGraphNode.label} has ${selectedGraphNode.risk.toLowerCase()} change risk because it touches authentication flow, rate limiting, and ${selectedGraphNode.tests} known tests.`,
-        checks: [
-          '4 controllers and 3 API endpoints are potentially affected.',
-          `${selectedGraphNode.tests} tests should run before merging.`,
-          'Review Redis adoption memory before changing cache semantics.',
-        ],
-      }
-    }
-
-    return {
-      title: 'Answer',
-      body: 'We use Redis as the primary cache and distributed rate limiter to improve response times and protect downstream services.',
-      checks: [
-        'Introduced in PR #188 to address authentication latency.',
-        'Selected over Memcached for persistence and richer data structures.',
-        'Central to session storage and rate limiting strategies.',
-      ],
-    }
-  }, [selectedGraphNode, submittedQuestion])
+  const answer = useMemo(() => buildLocalAnswer(submittedQuestion, selectedGraphNode), [selectedGraphNode, submittedQuestion])
 
   function addLog(entry: string) {
     setActivityLog((current) => [entry, ...current].slice(0, 6))
@@ -301,6 +424,7 @@ function App() {
     const clean = question.trim()
     if (!clean) return
     setSubmittedQuestion(clean)
+    setSelectedSource(0)
     setActivePanel('Ask')
     addLog(`Answered: ${clean}`)
   }
@@ -478,7 +602,7 @@ function LandingHero({
   question: string
   setQuestion: (value: string) => void
   submitQuestion: (event: FormEvent) => void
-  answer: { title: string; body: string; checks: string[] }
+  answer: Answer
   selectedSource: number
   setSelectedSource: (index: number) => void
   selectedNode: string
@@ -572,7 +696,7 @@ function ProductApp({
   setQuestion: (value: string) => void
   submitQuestion: (event: FormEvent) => void
   submittedQuestion: string
-  answer: { title: string; body: string; checks: string[] }
+  answer: Answer
   selectedSource: number
   setSelectedSource: (index: number) => void
   memories: Memory[]
@@ -983,11 +1107,14 @@ function AnswerBlock({
   setSelectedSource,
   compact = false,
 }: {
-  answer: { title: string; body: string; checks: string[] }
+  answer: Answer
   selectedSource: number
   setSelectedSource: (index: number) => void
   compact?: boolean
 }) {
+  const sources = answer.sources
+  const activeSource = sources[Math.min(selectedSource, sources.length - 1)]
+
   return (
     <div className={compact ? 'answer-block compact' : 'answer-block'}>
       <h4>{answer.title}</h4>
@@ -996,11 +1123,11 @@ function AnswerBlock({
         {answer.checks.map((check) => <li key={check}><Check size={15} /> {check}</li>)}
       </ul>
       <div className="source-header">
-        <strong>Sources ({sourceSeed.length})</strong>
-        <span>Confidence 96%</span>
+        <strong>Sources ({sources.length})</strong>
+        <span>Confidence {answer.confidence}</span>
       </div>
       <div className="source-list">
-        {sourceSeed.map((source, index) => (
+        {sources.map((source, index) => (
           <button className={selectedSource === index ? 'source-row selected' : 'source-row'} type="button" key={source.title} onClick={() => setSelectedSource(index)}>
             <FileCode2 size={14} aria-hidden="true" />
             <span>{source.title}</span>
@@ -1010,8 +1137,8 @@ function AnswerBlock({
         ))}
       </div>
       <div className="detail-box">
-        <strong>{sourceSeed[selectedSource].title}</strong>
-        <p>{sourceSeed[selectedSource].detail}</p>
+        <strong>{activeSource.title}</strong>
+        <p>{activeSource.detail}</p>
       </div>
     </div>
   )
