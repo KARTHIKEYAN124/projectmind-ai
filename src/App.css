@@ -58,6 +58,114 @@
   color: var(--teal-dark);
 }
 
+.site-nav button.active {
+  color: var(--teal-dark);
+}
+
+.nav-button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+.page-section {
+  min-height: calc(100vh - 68px);
+  padding: clamp(54px, 8vw, 96px) clamp(20px, 4vw, 56px);
+}
+
+.login-page {
+  display: grid;
+  place-items: start center;
+  background: #f8fafc;
+}
+
+.login-card {
+  width: min(440px, 100%);
+}
+
+.workflow-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.workflow-card {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.workflow-card strong {
+  color: var(--ink);
+}
+
+.workflow-card span,
+.status-line {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.app-frame-live {
+  margin: 0;
+  border-radius: 0;
+  border-inline: 0;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.repo-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.repo-form input,
+.file-select {
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 12px;
+  background: #f8fafc;
+  color: #293344;
+  font: 700 13px/1 var(--sans);
+}
+
+.compact-status {
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+}
+
+.memory-list {
+  display: grid;
+  gap: 8px;
+}
+
+.evidence-card {
+  min-height: auto;
+  padding-block: 9px;
+}
+
+.evidence-card p {
+  grid-column: 2 / -1;
+  margin: 0;
+  color: #4e5b6c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.file-select {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
 .nav-actions,
 .hero-actions,
 .toolbar {
@@ -1416,6 +1524,8 @@ button.change-row {
   .hero-grid,
   .preview-body,
   .dashboard-grid,
+  .live-grid,
+  .repo-form,
   .operations-band {
     grid-template-columns: 1fr;
   }
@@ -1495,6 +1605,7 @@ button.change-row {
   }
 
   .status-grid,
+  .compact-status,
   .indexing-status .ingest-list,
   .workbench .change-table,
   .docs-layout,

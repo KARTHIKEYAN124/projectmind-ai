@@ -1,500 +1,170 @@
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import {
   Activity,
-  AlertTriangle,
   ArrowRight,
   BookOpen,
-  Boxes,
   BrainCircuit,
-  Check,
-  ChevronDown,
-  CircleDot,
-  Clock3,
-  Code2,
   FileCode2,
-  GitBranch,
   GitPullRequest,
   History,
   KeyRound,
-  Layers3,
   LockKeyhole,
   MessageSquareText,
   Network,
   Pause,
   Play,
-  RefreshCw,
   Search,
-  Settings,
-  ShieldCheck,
   Sparkles,
-  SquareCode,
   UserRound,
 } from 'lucide-react'
 import './App.css'
 
-type IconType = typeof Activity
-type MemoryState = 'pending' | 'approved' | 'rejected'
-
-type Memory = {
-  id: number
-  date: string
-  title: string
-  body: string
-  kind: string
-  state: MemoryState
-}
-
-type Change = {
-  pr: string
-  title: string
-  risk: 'Low' | 'Medium' | 'High'
-  memory: string
-  reviewed: boolean
-}
-
+type Page = 'home' | 'features' | 'docs' | 'login' | 'demo' | 'app'
 type AuthProvider = 'GitHub' | 'Google' | 'email'
 type AuthMode = 'signup' | 'signin'
+type WorkflowStep = 'connect' | 'index' | 'ask' | 'memory' | 'impact'
 
-type DemoStep = {
-  title: string
-  body: string
-  metric: string
+type RepoFile = {
+  path: string
+  text: string
+  size: number
 }
 
-type Source = {
+type Commit = {
+  sha: string
+  message: string
+  author: string
+  date: string
+}
+
+type Evidence = {
   title: string
   kind: string
   confidence: string
   detail: string
 }
 
-type Answer = {
-  title: string
-  body: string
-  checks: string[]
-  confidence: string
-  sources: Source[]
+type RepoIndex = {
+  owner: string
+  repo: string
+  branch: string
+  files: RepoFile[]
+  commits: Commit[]
+  indexedAt: string
 }
 
-const navItems: Array<{ label: string; icon: IconType }> = [
-  { label: 'Dashboard', icon: Activity },
-  { label: 'Ask', icon: MessageSquareText },
-  { label: 'Memory', icon: BrainCircuit },
-  { label: 'Code', icon: Code2 },
-  { label: 'Changes', icon: GitBranch },
-  { label: 'Settings', icon: Settings },
+const demoSteps = [
+  ['Connect a repository', 'Sign in, paste a GitHub repository URL, and load metadata from GitHub.'],
+  ['Index code and history', 'Fetch repository files and recent commits, then create searchable evidence.'],
+  ['Ask why', 'Ask questions and rank answers from files, docs, commits, and memories.'],
+  ['Review memory', 'Turn useful answers into approved project memories with provenance.'],
+  ['Run impact analysis', 'Select a file and see likely dependencies, risk, and tests to run.'],
+] as const
+
+const featureList = [
+  ['Repository connection', 'Connect public GitHub repositories directly in the browser; OAuth launch is ready when client IDs are configured.'],
+  ['Code and history indexing', 'Fetch files, README/docs, package metadata, source files, and recent commit history.'],
+  ['Ask repository', 'Questions are answered from ranked repository evidence rather than a fixed demo response.'],
+  ['Memory review', 'Promote useful answers into approved project memories with source citations.'],
+  ['Impact analysis', 'Estimate change risk from selected files, imports, related paths, and test coverage hints.'],
+  ['Separate product pages', 'Features, Docs, Login, and Watch Demo now open as distinct app pages.'],
 ]
 
-const redisSources: Source[] = [
-  { title: 'Introduced in PR #188', kind: 'pull_request', confidence: '96%', detail: 'Merged by Sarah after p95 login latency dropped from 820ms to 230ms.' },
-  { title: 'Issue #142 Authentication latency', kind: 'issue', confidence: '93%', detail: 'Login bursts caused repeated PostgreSQL session lookups and queueing.' },
-  { title: 'docs/adr/002-redis-adoption.md', kind: 'doc', confidence: '92%', detail: 'ADR records Redis over Memcached for persistence and rate limiting.' },
-  { title: 'cache/redis_client.go', kind: 'code', confidence: '90%', detail: 'Defines connection pool, retries, timeouts, and circuit breaker behavior.' },
-]
-
-const architectureSources: Source[] = [
-  { title: 'ProjectMind product docs', kind: 'doc', confidence: '88%', detail: 'Defines architecture as the important structure, boundaries, dependencies, and tradeoffs that explain how a system is built.' },
-  { title: 'Code graph model', kind: 'graph', confidence: '84%', detail: 'The graph connects modules, calls, imports, dependencies, tests, and ownership evidence.' },
-  { title: 'Memory lifecycle', kind: 'memory', confidence: '80%', detail: 'Architecture memories should keep decisions, constraints, supersessions, and source provenance.' },
-  { title: 'Repository onboarding workflow', kind: 'workflow', confidence: '78%', detail: 'Project understanding starts by indexing source code, history, PRs, issues, docs, and extracted decisions.' },
-]
-
-const generalSources: Source[] = [
-  { title: 'Ask repository workflow', kind: 'workflow', confidence: '72%', detail: 'The prototype can answer from seeded product knowledge, memory records, graph nodes, and change records.' },
-  { title: 'Current prototype limitation', kind: 'system', confidence: '100%', detail: 'No live backend or LLM is connected in this frontend-only prototype, so unknown questions are answered transparently.' },
-  { title: 'Docs: Ask repository', kind: 'doc', confidence: '78%', detail: 'The Ask section changes strategy for architecture, history, bug, impact, decision, and dependency style questions.' },
-  { title: 'Task workbench activity', kind: 'log', confidence: '76%', detail: 'User questions and review actions are written into the visible activity log.' },
-]
-
-const memorySeed: Memory[] = [
+const initialMemories: Evidence[] = [
   {
-    id: 1,
-    date: 'May 8, 2026',
-    title: 'Introduced in PR #188',
-    body: 'Added Redis for caching and distributed rate limiting to resolve authentication latency.',
-    kind: 'pull_request',
-    state: 'approved',
-  },
-  {
-    id: 2,
-    date: 'Apr 22, 2026',
-    title: 'Issue #142 Authentication latency',
-    body: 'High p95 latency during login bursts identified session lookups as the bottleneck.',
-    kind: 'issue',
-    state: 'approved',
-  },
-  {
-    id: 3,
-    date: 'Apr 24, 2026',
-    title: 'docs/adr/002-redis-adoption.md',
-    body: 'Decision: adopt Redis over Memcached for cache persistence and rate limit strategy.',
-    kind: 'doc',
-    state: 'pending',
-  },
-  {
-    id: 4,
-    date: 'Apr 25, 2026',
-    title: 'cache/redis_client.go',
-    body: 'Initial Redis client with connection pool, retry logic, and circuit breaker.',
-    kind: 'code',
-    state: 'pending',
-  },
-  {
-    id: 5,
-    date: 'May 1, 2026',
-    title: 'Changed rate limit strategy',
-    body: 'Moved from in-memory to Redis-backed sliding window limits.',
-    kind: 'commit',
-    state: 'approved',
+    title: 'Project memory requires provenance',
+    kind: 'memory',
+    confidence: '92%',
+    detail: 'Every useful answer should point back to files, commits, docs, issues, or approved team knowledge.',
   },
 ]
-
-const ingestLabels = [
-  ['Files discovered', '87,231'],
-  ['Symbols extracted', '14,481'],
-  ['Dependencies mapped', '5,224'],
-  ['Commits analyzed', '614'],
-  ['Pull requests processed', '74'],
-  ['Building engineering memory', '78%'],
-  ['Generating knowledge graph', 'Queued'],
-]
-
-const graphNodes = [
-  { id: 'redis', label: 'Redis Client', file: 'cache/redis_client.go', className: 'center', risk: 'High', tests: 8 },
-  { id: 'session', label: 'Session Store', file: 'session/store.go', className: 'top', risk: 'Medium', tests: 3 },
-  { id: 'rate', label: 'Rate Limiter', file: 'rate/limiter.go', className: 'right', risk: 'High', tests: 5 },
-  { id: 'user', label: 'User Service', file: 'service/user.go', className: 'bottom-right', risk: 'Medium', tests: 4 },
-  { id: 'auth', label: 'Auth Service', file: 'service/auth.go', className: 'bottom', risk: 'High', tests: 8 },
-  { id: 'config', label: 'Config', file: 'config/cache.go', className: 'left', risk: 'Low', tests: 1 },
-]
-
-const changeSeed: Change[] = [
-  { pr: 'PR #228', title: 'Add password reset', risk: 'Medium', memory: '3 memories', reviewed: false },
-  { pr: 'PR #226', title: 'Move rate limiter to Redis', risk: 'High', memory: '2 stale docs', reviewed: false },
-  { pr: 'PR #221', title: 'Refactor auth middleware', risk: 'Low', memory: '1 decision', reviewed: true },
-]
-
-const docsFeatures = [
-  ['Authentication', 'Signup, signin, GitHub OAuth launch, Google OAuth launch, and local email-session demo.'],
-  ['GitHub connection', 'Repository-first onboarding with OAuth configuration checks and repository selection state.'],
-  ['Repository indexing', 'Visible ingestion tasks for files, symbols, dependencies, commits, PRs, memories, and graph creation.'],
-  ['Ask repository', 'Question form that changes answer strategy for decisions, impact, history, and database questions.'],
-  ['Evidence citations', 'Clickable sources with source type, confidence, and provenance detail.'],
-  ['Memory explorer', 'Manual memory creation plus approval and rejection for candidate memories.'],
-  ['Code graph', 'Clickable dependency graph with selected module state.'],
-  ['Impact analysis', 'Risk, affected endpoints, and test count update from selected graph node.'],
-  ['Change intelligence', 'PR selection and review workflow that queues memory candidates.'],
-  ['Activity log', 'Every user action writes a visible operational trace in the workbench.'],
-]
-
-const demoSteps: DemoStep[] = [
-  {
-    title: 'Connect a repository',
-    body: 'ProjectMind starts with GitHub authorization, workspace selection, and repository sync.',
-    metric: '12 repositories found',
-  },
-  {
-    title: 'Index code and history',
-    body: 'The worker extracts files, symbols, dependencies, commits, PRs, issues, and docs.',
-    metric: '14,481 symbols extracted',
-  },
-  {
-    title: 'Ask why',
-    body: 'A developer asks why Redis exists and receives an evidence-backed answer.',
-    metric: '4 citations ranked',
-  },
-  {
-    title: 'Review memory',
-    body: 'The team approves durable memories instead of letting AI silently rewrite project truth.',
-    metric: '2 memories pending',
-  },
-  {
-    title: 'Run impact analysis',
-    body: 'The graph shows which services, endpoints, and tests are affected by a change.',
-    metric: 'High risk: Auth Service',
-  },
-]
-
-function getOAuthClientId(provider: AuthProvider) {
-  if (provider === 'GitHub') return import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined
-  if (provider === 'Google') return import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
-  return undefined
-}
-
-function scrollToSection(id: string) {
-  window.history.pushState(null, '', `#${id}`)
-  const run = () => {
-    const target = document.getElementById(id)
-    if (!target) return
-
-    const top = target.getBoundingClientRect().top + window.scrollY - 78
-    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
-  }
-
-  window.setTimeout(run, 30)
-  window.setTimeout(run, 350)
-  window.setTimeout(run, 900)
-}
-
-function buildLocalAnswer(question: string, selectedGraphNode: typeof graphNodes[number]): Answer {
-  const clean = question.trim()
-  const lower = clean.toLowerCase()
-
-  if (lower.includes('architecture') || lower.includes('architectural')) {
-    return {
-      title: 'Architecture',
-      body: 'Architecture is the set of important system structures and decisions that shape how software is organized, changed, deployed, and operated. In ProjectMind, that means service boundaries, data flow, dependencies, conventions, constraints, decisions, incidents, and the reasons previous changes were made.',
-      checks: [
-        'It explains why the system is shaped a certain way, not just what each file does.',
-        'It includes code relationships, ADRs, PR history, incidents, conventions, and technical constraints.',
-        'A useful architecture answer should cite evidence and mention what may break if the structure changes.',
-      ],
-      confidence: '88%',
-      sources: architectureSources,
-    }
-  }
-
-  if (lower.includes('postgres') || lower.includes('mongo') || lower.includes('database')) {
-    return {
-      title: 'Database decision',
-      body: 'PostgreSQL is the system of record because the team needed transactional consistency, relational reporting, and simpler migration paths after an earlier MongoDB experiment was rejected.',
-      checks: [
-        'MongoDB session storage was rejected after concurrent update issues.',
-        'PostgreSQL migration was confirmed in ADR #004 and PR #421.',
-        'Current auth, billing, and reporting modules depend on relational constraints.',
-      ],
-      confidence: '86%',
-      sources: [
-        { title: 'ADR #004 PostgreSQL migration', kind: 'doc', confidence: '89%', detail: 'Records the relational database migration rationale and consistency requirements.' },
-        { title: 'PR #421 Database migration', kind: 'pull_request', confidence: '87%', detail: 'Migrated production data flows from MongoDB-oriented models to PostgreSQL tables.' },
-        { title: 'Issue #67 MongoDB session experiment', kind: 'issue', confidence: '81%', detail: 'Concurrent session updates caused consistency problems during the rejected experiment.' },
-        { title: 'billing/schema.sql', kind: 'code', confidence: '78%', detail: 'Billing and reporting depend on relational constraints and joins.' },
-      ],
-    }
-  }
-
-  if (lower.includes('break') || lower.includes('change') || lower.includes('impact')) {
-    return {
-      title: 'Impact analysis',
-      body: `${selectedGraphNode.label} has ${selectedGraphNode.risk.toLowerCase()} change risk because it touches authentication flow, rate limiting, and ${selectedGraphNode.tests} known tests.`,
-      checks: [
-        '4 controllers and 3 API endpoints are potentially affected.',
-        `${selectedGraphNode.tests} tests should run before merging.`,
-        `Review memories connected to ${selectedGraphNode.file} before changing behavior.`,
-      ],
-      confidence: '91%',
-      sources: [
-        { title: selectedGraphNode.label, kind: 'graph_node', confidence: '91%', detail: `${selectedGraphNode.file} is selected in the dependency graph.` },
-        { title: 'Impact traversal result', kind: 'graph', confidence: '88%', detail: 'The prototype graph links the selected module to auth, user, config, and rate-limit dependencies.' },
-        { title: 'Known test coverage', kind: 'test', confidence: '82%', detail: `${selectedGraphNode.tests} tests are associated with this module in the seeded graph data.` },
-        { title: 'Task workbench risk model', kind: 'workflow', confidence: '76%', detail: 'Risk is estimated from dependency count, endpoint proximity, and known test coverage.' },
-      ],
-    }
-  }
-
-  if (lower.includes('redis') || lower.includes('cache') || lower.includes('rate limit')) {
-    return {
-      title: 'Redis decision',
-      body: 'Redis is used as the primary cache and distributed rate limiter to improve response times and protect downstream services.',
-      checks: [
-        'Introduced in PR #188 to address authentication latency.',
-        'Selected over Memcached for persistence and richer data structures.',
-        'Central to session storage and rate limiting strategies.',
-      ],
-      confidence: '96%',
-      sources: redisSources,
-    }
-  }
-
-  if (lower.includes('bug') || lower.includes('error') || lower.includes('incident')) {
-    return {
-      title: 'Historical bug memory',
-      body: 'ProjectMind would search issue history, merged fixes, stack traces, incidents, and related memories to find whether the team has seen the failure before. In this prototype, the strongest seeded bug-like memory is the authentication latency issue that led to Redis adoption.',
-      checks: [
-        'Issue #142 identified authentication latency during login bursts.',
-        'PR #188 fixed the known bottleneck with Redis-backed caching.',
-        'A production version should compare stack traces and affected files before suggesting a fix.',
-      ],
-      confidence: '79%',
-      sources: redisSources,
-    }
-  }
-
-  if (lower.includes('security') || lower.includes('auth') || lower.includes('login')) {
-    return {
-      title: 'Authentication and security context',
-      body: 'The current prototype models GitHub, Google, and email authentication flows. Real OAuth redirects require client IDs, and production sessions require a backend callback so secrets and token exchange never happen in the browser.',
-      checks: [
-        'GitHub and Google buttons check for Vite OAuth client IDs before redirecting.',
-        'Email signup/signin creates only a local browser demo session.',
-        'Production needs a server-side callback, encrypted secrets, CSRF state validation, and RBAC.',
-      ],
-      confidence: '90%',
-      sources: [
-        { title: '.env.example', kind: 'config', confidence: '100%', detail: 'Lists VITE_GITHUB_CLIENT_ID and VITE_GOOGLE_CLIENT_ID for frontend OAuth launch configuration.' },
-        { title: 'Authentication docs', kind: 'doc', confidence: '86%', detail: 'Documents signup, signin, OAuth launch, and local email-session behavior.' },
-        { title: 'Auth panel implementation', kind: 'code', confidence: '84%', detail: 'OAuth buttons redirect only when configured; email flow writes a local demo session.' },
-        { title: 'Security requirement', kind: 'system', confidence: '82%', detail: 'Production OAuth code exchange belongs on the backend, not in a public frontend.' },
-      ],
-    }
-  }
-
-  if (lower.includes('dependency') || lower.includes('depends') || lower.includes('related file')) {
-    return {
-      title: 'Dependency context',
-      body: `${selectedGraphNode.label} is currently selected in the graph. The prototype shows its neighboring dependencies and uses that selection to estimate change risk, affected endpoints, and test coverage.`,
-      checks: [
-        'Click graph nodes to change the active module.',
-        'The impact panel updates risk, tests, endpoints, and the file path.',
-        'A production version would traverse imports, calls, tests, ownership, and PR history.',
-      ],
-      confidence: '84%',
-      sources: architectureSources,
-    }
-  }
-
-  return {
-    title: 'Question needs repository evidence',
-    body: `I do not have enough seeded evidence in this frontend prototype to answer "${clean}" as a factual project-memory answer. A production ProjectMind answer would retrieve matching code symbols, memories, PRs, issues, docs, graph paths, and git history before responding.`,
-    checks: [
-      'This prototype avoids inventing a confident answer when no matching evidence is available.',
-      'Try asking about architecture, Redis, database decisions, bugs, security, dependencies, or impact analysis.',
-      'Connecting a real backend/LLM and repository index would make open-ended questions answerable from live evidence.',
-    ],
-    confidence: '62%',
-    sources: generalSources,
-  }
-}
 
 function App() {
-  const [question, setQuestion] = useState('Why do we use Redis?')
-  const [submittedQuestion, setSubmittedQuestion] = useState('Why do we use Redis?')
-  const [selectedSource, setSelectedSource] = useState(0)
-  const [memories, setMemories] = useState(memorySeed)
-  const [memoryDraft, setMemoryDraft] = useState('')
-  const [selectedNode, setSelectedNode] = useState('redis')
-  const [indexProgress, setIndexProgress] = useState(5)
-  const [authStatus, setAuthStatus] = useState('Not connected')
-  const [changes, setChanges] = useState(changeSeed)
-  const [selectedChange, setSelectedChange] = useState('PR #226')
-  const [activePanel, setActivePanel] = useState('Dashboard')
+  const [page, setPage] = useState<Page>('home')
   const [authMode, setAuthMode] = useState<AuthMode>('signup')
-  const [authEmail, setAuthEmail] = useState('alex@acme.com')
-  const [authName, setAuthName] = useState('Alex Morgan')
-  const [authPassword, setAuthPassword] = useState('projectmind-demo')
+  const [authStatus, setAuthStatus] = useState('Not signed in')
+  const [name, setName] = useState('Alex Morgan')
+  const [email, setEmail] = useState('alex@acme.com')
+  const [password, setPassword] = useState('projectmind-demo')
+  const [repoUrl, setRepoUrl] = useState('https://github.com/KARTHIKEYAN124/projectmind-ai')
+  const [repoIndex, setRepoIndex] = useState<RepoIndex | null>(null)
+  const [connectStatus, setConnectStatus] = useState('Paste a public GitHub repository URL to begin.')
+  const [isIndexing, setIsIndexing] = useState(false)
+  const [question, setQuestion] = useState('What does this repository do?')
+  const [answer, setAnswer] = useState('Connect and index a repository, then ask a question.')
+  const [evidence, setEvidence] = useState<Evidence[]>([])
+  const [memories, setMemories] = useState<Evidence[]>(initialMemories)
+  const [selectedFile, setSelectedFile] = useState('')
+  const [activeStep, setActiveStep] = useState<WorkflowStep>('connect')
   const [demoPlaying, setDemoPlaying] = useState(false)
   const [demoStep, setDemoStep] = useState(0)
-  const [activityLog, setActivityLog] = useState<string[]>([
-    'Repository acme/platform loaded.',
-    'Evidence pack assembled for Redis question.',
-  ])
+  const [activityLog, setActivityLog] = useState<string[]>(['ProjectMind ready.'])
 
-  const selectedGraphNode = graphNodes.find((node) => node.id === selectedNode) ?? graphNodes[0]
-  const selectedChangeRow = changes.find((change) => change.pr === selectedChange) ?? changes[0]
+  useEffect(() => {
+    const hash = window.location.hash.replace('#', '') as Page
+    if (['features', 'docs', 'login', 'demo', 'app'].includes(hash)) setPage(hash)
+  }, [])
 
   useEffect(() => {
     if (!demoPlaying) return
-
-    const timer = window.setInterval(() => {
-      setDemoStep((current) => (current + 1) % demoSteps.length)
-    }, 2400)
-
+    const timer = window.setInterval(() => setDemoStep((current) => (current + 1) % demoSteps.length), 2400)
     return () => window.clearInterval(timer)
   }, [demoPlaying])
 
-  useEffect(() => {
-    const hash = window.location.hash
-    if (!hash) return
+  const stats = useMemo(() => {
+    const files = repoIndex?.files.length ?? 0
+    const commits = repoIndex?.commits.length ?? 0
+    const symbols = repoIndex ? estimateSymbols(repoIndex.files) : 0
+    const docs = repoIndex ? repoIndex.files.filter((file) => isDocFile(file.path)).length : 0
+    return { files, commits, symbols, docs }
+  }, [repoIndex])
 
-    const timers = [80, 350, 900].map((delay) => window.setTimeout(() => {
-      document.querySelector(hash)?.scrollIntoView({ block: 'start' })
-    }, delay))
+  const impact = useMemo(() => {
+    if (!repoIndex || !selectedFile) return null
+    const file = repoIndex.files.find((item) => item.path === selectedFile)
+    if (!file) return null
+    return analyzeImpact(file, repoIndex.files)
+  }, [repoIndex, selectedFile])
 
-    return () => timers.forEach((timer) => window.clearTimeout(timer))
-  }, [])
-
-  const answer = useMemo(() => buildLocalAnswer(submittedQuestion, selectedGraphNode), [selectedGraphNode, submittedQuestion])
-
-  function addLog(entry: string) {
-    setActivityLog((current) => [entry, ...current].slice(0, 6))
+  function go(next: Page) {
+    window.history.pushState(null, '', next === 'home' ? '#' : `#${next}`)
+    setPage(next)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function submitQuestion(event: FormEvent) {
-    event.preventDefault()
-    const clean = question.trim()
-    if (!clean) return
-    setSubmittedQuestion(clean)
-    setSelectedSource(0)
-    setActivePanel('Ask')
-    addLog(`Answered: ${clean}`)
+  function log(entry: string) {
+    setActivityLog((current) => [entry, ...current].slice(0, 8))
   }
 
-  function updateMemory(id: number, state: MemoryState) {
-    setMemories((current) => current.map((memory) => (memory.id === id ? { ...memory, state } : memory)))
-    addLog(`${state === 'approved' ? 'Approved' : 'Rejected'} memory #${id}.`)
-  }
-
-  function addMemory(event: FormEvent) {
-    event.preventDefault()
-    const clean = memoryDraft.trim()
-    if (!clean) return
-    setMemories((current) => [
-      {
-        id: Date.now(),
-        date: 'Today',
-        title: clean,
-        body: 'Manual team memory awaiting approval and source attachment.',
-        kind: 'team_knowledge',
-        state: 'pending',
-      },
-      ...current,
-    ])
-    setMemoryDraft('')
-    setActivePanel('Memory')
-    addLog(`Created candidate memory: ${clean}`)
-  }
-
-  function advanceIndexing() {
-    setIndexProgress((current) => {
-      const next = Math.min(current + 1, ingestLabels.length)
-      addLog(next === ingestLabels.length ? 'Knowledge graph is ready.' : `Indexing advanced to step ${next + 1}.`)
-      return next
-    })
-  }
-
-  function connect(provider: AuthProvider) {
+  function signIn(provider: AuthProvider) {
     if (provider === 'email') {
-      const cleanEmail = authEmail.trim().toLowerCase()
-      if (!cleanEmail || authPassword.length < 8) {
-        setAuthStatus('Enter an email and at least 8 characters for password.')
+      if (!email.trim() || password.length < 8) {
+        setAuthStatus('Enter an email and a password with at least 8 characters.')
         return
       }
-
-      const account = { name: authName.trim() || cleanEmail, email: cleanEmail, signedInAt: new Date().toISOString() }
-      window.localStorage.setItem('projectmind-user', JSON.stringify(account))
-      setAuthStatus(`${authMode === 'signup' ? 'Signed up' : 'Signed in'} as ${account.email}`)
-      addLog(`${authMode === 'signup' ? 'Created' : 'Opened'} email session for ${account.email}.`)
+      const account = { name, email, provider: 'email', signedInAt: new Date().toISOString() }
+      localStorage.setItem('projectmind-user', JSON.stringify(account))
+      setAuthStatus(`${authMode === 'signup' ? 'Signed up' : 'Signed in'} as ${email}`)
+      log(`${authMode === 'signup' ? 'Created' : 'Opened'} email session for ${email}.`)
+      go('app')
       return
     }
 
-    const clientId = getOAuthClientId(provider)
+    const clientId = provider === 'GitHub'
+      ? import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined
+      : import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
+
     if (!clientId) {
       setAuthStatus(`${provider} OAuth needs ${provider === 'GitHub' ? 'VITE_GITHUB_CLIENT_ID' : 'VITE_GOOGLE_CLIENT_ID'} in .env.local.`)
-      addLog(`${provider} OAuth setup required before redirect.`)
       return
     }
 
-    const redirectUri = `${window.location.origin}/auth/${provider.toLowerCase()}/callback`
     const state = crypto.randomUUID()
-    window.sessionStorage.setItem(`projectmind-${provider.toLowerCase()}-oauth-state`, state)
+    sessionStorage.setItem(`projectmind-${provider.toLowerCase()}-state`, state)
+    const redirectUri = `${window.location.origin}/auth/${provider.toLowerCase()}/callback`
 
     if (provider === 'GitHub') {
-      const params = new URLSearchParams({
-        client_id: clientId,
-        redirect_uri: redirectUri,
-        scope: 'read:user user:email repo',
-        state,
-      })
+      const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, scope: 'read:user user:email repo', state })
       window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`
       return
     }
@@ -504,158 +174,191 @@ function App() {
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'openid email profile',
-      state,
       prompt: 'select_account',
+      state,
     })
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
   }
 
-  function reviewSelectedChange() {
-    setChanges((current) => current.map((change) => (
-      change.pr === selectedChange ? { ...change, reviewed: true, memory: 'reviewed' } : change
-    )))
-    setActivePanel('Changes')
-    addLog(`${selectedChange} reviewed and memory candidates queued.`)
+  async function connectAndIndexRepository(event?: FormEvent) {
+    event?.preventDefault()
+    const parsed = parseGitHubUrl(repoUrl)
+    if (!parsed) {
+      setConnectStatus('Enter a valid GitHub repository URL, for example https://github.com/owner/repo.')
+      return
+    }
+
+    setIsIndexing(true)
+    setActiveStep('index')
+    setConnectStatus(`Connecting to ${parsed.owner}/${parsed.repo}...`)
+    log(`Connecting to ${parsed.owner}/${parsed.repo}.`)
+
+    try {
+      const index = await buildRepoIndex(parsed.owner, parsed.repo)
+      setRepoIndex(index)
+      setSelectedFile(index.files[0]?.path ?? '')
+      setConnectStatus(`Indexed ${index.files.length} files and ${index.commits.length} commits from ${index.owner}/${index.repo}.`)
+      setEvidence([
+        { title: `${index.owner}/${index.repo}`, kind: 'repository', confidence: '100%', detail: `Default branch: ${index.branch}. Indexed at ${new Date(index.indexedAt).toLocaleString()}.` },
+        { title: 'Recent commits', kind: 'history', confidence: '88%', detail: index.commits.slice(0, 3).map((commit) => commit.message).join(' | ') || 'No commits returned by GitHub API.' },
+      ])
+      setAnswer(`Repository indexed. Ask about architecture, files, dependencies, setup, history, risks, or why something exists in ${index.owner}/${index.repo}.`)
+      log(`Indexed ${index.files.length} files and ${index.commits.length} commits.`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown GitHub API error.'
+      setConnectStatus(message)
+      log(`Indexing failed: ${message}`)
+    } finally {
+      setIsIndexing(false)
+    }
+  }
+
+  function askRepository(event: FormEvent) {
+    event.preventDefault()
+    if (!repoIndex) {
+      setAnswer('Connect and index a repository first. I need real files and commits before I can answer from repo evidence.')
+      setEvidence([])
+      setActiveStep('connect')
+      return
+    }
+
+    const result = answerFromIndex(question, repoIndex, memories)
+    setAnswer(result.answer)
+    setEvidence(result.evidence)
+    setActiveStep('ask')
+    log(`Answered from repository index: ${question}`)
+  }
+
+  function approveMemory() {
+    if (!answer || evidence.length === 0) return
+    const memory = {
+      title: question,
+      kind: 'approved_memory',
+      confidence: evidence[0]?.confidence ?? '75%',
+      detail: answer,
+    }
+    setMemories((current) => [memory, ...current])
+    setActiveStep('memory')
+    log(`Approved memory for question: ${question}`)
+  }
+
+  function runImpact() {
+    if (!repoIndex) {
+      setAnswer('Index a repository before running impact analysis.')
+      return
+    }
+    setActiveStep('impact')
+    if (!selectedFile && repoIndex.files[0]) setSelectedFile(repoIndex.files[0].path)
+    log(`Ran impact analysis for ${selectedFile || repoIndex.files[0]?.path}.`)
   }
 
   return (
     <main className="site-shell">
-      <LandingHero
-        question={question}
-        setQuestion={setQuestion}
-        submitQuestion={submitQuestion}
-        answer={answer}
-        selectedSource={selectedSource}
-        setSelectedSource={setSelectedSource}
-        selectedNode={selectedNode}
-        setSelectedNode={setSelectedNode}
-      />
-      <ProductApp
-        activePanel={activePanel}
-        setActivePanel={setActivePanel}
-        question={question}
-        setQuestion={setQuestion}
-        submitQuestion={submitQuestion}
-        submittedQuestion={submittedQuestion}
-        answer={answer}
-        selectedSource={selectedSource}
-        setSelectedSource={setSelectedSource}
-        memories={memories}
-        updateMemory={updateMemory}
-        memoryDraft={memoryDraft}
-        setMemoryDraft={setMemoryDraft}
-        addMemory={addMemory}
-        selectedNode={selectedNode}
-        setSelectedNode={setSelectedNode}
-        selectedGraphNode={selectedGraphNode}
-        indexProgress={indexProgress}
-        advanceIndexing={advanceIndexing}
-        changes={changes}
-        selectedChange={selectedChange}
-        setSelectedChange={setSelectedChange}
-        selectedChangeRow={selectedChangeRow}
-        reviewSelectedChange={reviewSelectedChange}
-        activityLog={activityLog}
-      />
-      <WorkflowSections setActivePanel={setActivePanel} addLog={addLog} />
-      <AuthAndOnboarding
-        authStatus={authStatus}
-        connect={connect}
-        authMode={authMode}
-        setAuthMode={setAuthMode}
-        authEmail={authEmail}
-        setAuthEmail={setAuthEmail}
-        authName={authName}
-        setAuthName={setAuthName}
-        authPassword={authPassword}
-        setAuthPassword={setAuthPassword}
-        indexProgress={indexProgress}
-        advanceIndexing={advanceIndexing}
-        changes={changes}
-        selectedChange={selectedChange}
-        setSelectedChange={setSelectedChange}
-        selectedChangeRow={selectedChangeRow}
-        reviewSelectedChange={reviewSelectedChange}
-      />
-      <DocsSection />
-      <DemoSection
-        demoPlaying={demoPlaying}
-        setDemoPlaying={setDemoPlaying}
-        demoStep={demoStep}
-        setDemoStep={setDemoStep}
-      />
-      <FooterCta />
+      <TopNav page={page} go={go} />
+      {page === 'home' ? <HomePage go={go} /> : null}
+      {page === 'features' ? <FeaturesPage /> : null}
+      {page === 'docs' ? <DocsPage /> : null}
+      {page === 'login' ? (
+        <LoginPage
+          authMode={authMode}
+          setAuthMode={setAuthMode}
+          authStatus={authStatus}
+          name={name}
+          setName={setName}
+          email={email}
+          setEmail={setEmail}
+          password={password}
+          setPassword={setPassword}
+          signIn={signIn}
+        />
+      ) : null}
+      {page === 'demo' ? (
+        <DemoPage demoPlaying={demoPlaying} setDemoPlaying={setDemoPlaying} demoStep={demoStep} setDemoStep={setDemoStep} />
+      ) : null}
+      {page === 'app' ? (
+        <WorkspacePage
+          activeStep={activeStep}
+          repoUrl={repoUrl}
+          setRepoUrl={setRepoUrl}
+          connectStatus={connectStatus}
+          isIndexing={isIndexing}
+          connectAndIndexRepository={connectAndIndexRepository}
+          repoIndex={repoIndex}
+          stats={stats}
+          question={question}
+          setQuestion={setQuestion}
+          askRepository={askRepository}
+          answer={answer}
+          evidence={evidence}
+          memories={memories}
+          approveMemory={approveMemory}
+          selectedFile={selectedFile}
+          setSelectedFile={setSelectedFile}
+          runImpact={runImpact}
+          impact={impact}
+          activityLog={activityLog}
+        />
+      ) : null}
     </main>
   )
 }
 
-function LandingHero({
-  question,
-  setQuestion,
-  submitQuestion,
-  answer,
-  selectedSource,
-  setSelectedSource,
-  selectedNode,
-  setSelectedNode,
-}: {
-  question: string
-  setQuestion: (value: string) => void
-  submitQuestion: (event: FormEvent) => void
-  answer: Answer
-  selectedSource: number
-  setSelectedSource: (index: number) => void
-  selectedNode: string
-  setSelectedNode: (id: string) => void
-}) {
+function TopNav({ page, go }: { page: Page; go: (page: Page) => void }) {
   return (
-    <section className="hero-section" id="top">
-      <header className="topbar" aria-label="ProjectMind navigation">
-        <a className="brand" href="#top" aria-label="ProjectMind home">
-          <BrainCircuit size={28} aria-hidden="true" />
-          <span>ProjectMind</span>
-        </a>
-        <nav className="site-nav" aria-label="Main navigation">
-          <button type="button" onClick={() => scrollToSection('features')}>Features</button>
-          <button type="button" onClick={() => scrollToSection('docs')}>Docs</button>
-          <button type="button" onClick={() => scrollToSection('login')}>Login</button>
-        </nav>
-        <div className="nav-actions">
-          <button className="button primary" type="button" onClick={() => scrollToSection('login')}>
-            <GitPullRequest size={18} aria-hidden="true" />
-            Connect GitHub
+    <header className="topbar">
+      <button className="brand nav-button" type="button" onClick={() => go('home')}>
+        <BrainCircuit size={28} />
+        <span>ProjectMind</span>
+      </button>
+      <nav className="site-nav">
+        {(['features', 'docs', 'login'] as Page[]).map((item) => (
+          <button className={page === item ? 'active' : ''} type="button" key={item} onClick={() => go(item)}>
+            {item[0].toUpperCase() + item.slice(1)}
           </button>
-          <button className="button secondary" type="button" onClick={() => scrollToSection('demo')}>
-            <Play size={16} aria-hidden="true" />
-            Watch Demo
-          </button>
-        </div>
-      </header>
+        ))}
+      </nav>
+      <div className="nav-actions">
+        <button className="button primary" type="button" onClick={() => go('login')}>
+          <GitPullRequest size={18} />
+          Connect GitHub
+        </button>
+        <button className="button secondary" type="button" onClick={() => go('demo')}>
+          <Play size={16} />
+          Watch Demo
+        </button>
+      </div>
+    </header>
+  )
+}
 
+function HomePage({ go }: { go: (page: Page) => void }) {
+  return (
+    <section className="hero-section">
       <div className="hero-grid">
         <div className="hero-copy">
           <h1>Your codebase remembers every decision.</h1>
-          <p className="hero-lede">Persistent engineering memory for developers and AI agents.</p>
+          <p className="hero-lede">Connect a GitHub repository, index its code and history, then ask questions grounded in real evidence.</p>
           <p className="hero-subline">Ask why, not just what.</p>
           <div className="hero-actions">
-            <button className="button primary large" type="button" onClick={() => scrollToSection('login')}>
-              <GitPullRequest size={20} aria-hidden="true" />
-              Connect GitHub
+            <button className="button primary large" type="button" onClick={() => go('app')}>
+              <GitPullRequest size={20} />
+              Open Workspace
             </button>
-            <button className="button secondary large" type="button" onClick={() => scrollToSection('demo')}>
-              <Play size={18} aria-hidden="true" />
+            <button className="button secondary large" type="button" onClick={() => go('demo')}>
+              <Play size={18} />
               Watch Demo
             </button>
           </div>
-          <p className="memory-line">Give your codebase a memory.</p>
         </div>
-
-        <div className="answer-preview" aria-label="Interactive evidence backed answer">
-          <PanelTitle icon={MessageSquareText} title="Ask" actionIcon={Sparkles} />
-          <AskForm question={question} setQuestion={setQuestion} submitQuestion={submitQuestion} compact />
-          <div className="preview-body">
-            <AnswerBlock answer={answer} selectedSource={selectedSource} setSelectedSource={setSelectedSource} compact />
-            <CodeGraph selectedNode={selectedNode} setSelectedNode={setSelectedNode} compact />
+        <div className="answer-preview">
+          <PanelTitle icon={MessageSquareText} title="Repository workflow" />
+          <div className="workflow-stack">
+            {demoSteps.map(([title, body], index) => (
+              <div className="workflow-card" key={title}>
+                <strong>{index + 1}. {title}</strong>
+                <span>{body}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -663,313 +366,51 @@ function LandingHero({
   )
 }
 
-function ProductApp({
-  activePanel,
-  setActivePanel,
-  question,
-  setQuestion,
-  submitQuestion,
-  submittedQuestion,
-  answer,
-  selectedSource,
-  setSelectedSource,
-  memories,
-  updateMemory,
-  memoryDraft,
-  setMemoryDraft,
-  addMemory,
-  selectedNode,
-  setSelectedNode,
-  selectedGraphNode,
-  indexProgress,
-  advanceIndexing,
-  changes,
-  selectedChange,
-  setSelectedChange,
-  selectedChangeRow,
-  reviewSelectedChange,
-  activityLog,
-}: {
-  activePanel: string
-  setActivePanel: (panel: string) => void
-  question: string
-  setQuestion: (value: string) => void
-  submitQuestion: (event: FormEvent) => void
-  submittedQuestion: string
-  answer: Answer
-  selectedSource: number
-  setSelectedSource: (index: number) => void
-  memories: Memory[]
-  updateMemory: (id: number, state: MemoryState) => void
-  memoryDraft: string
-  setMemoryDraft: (value: string) => void
-  addMemory: (event: FormEvent) => void
-  selectedNode: string
-  setSelectedNode: (id: string) => void
-  selectedGraphNode: typeof graphNodes[number]
-  indexProgress: number
-  advanceIndexing: () => void
-  changes: Change[]
-  selectedChange: string
-  setSelectedChange: (pr: string) => void
-  selectedChangeRow: Change
-  reviewSelectedChange: () => void
-  activityLog: string[]
-}) {
+function FeaturesPage() {
   return (
-    <section className="app-frame" id="app" aria-label="ProjectMind application">
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <BrainCircuit size={22} aria-hidden="true" />
-          <span>ProjectMind</span>
-        </div>
-        <button className="repo-switch" type="button" onClick={() => setActivePanel('Settings')}>
-          <GitBranch size={16} aria-hidden="true" />
-          acme/platform
-          <ChevronDown size={16} aria-hidden="true" />
-        </button>
-        <nav className="app-nav" aria-label="Application navigation">
-          {navItems.map((item) => (
-            <button className={activePanel === item.label ? 'active' : ''} type="button" key={item.label} onClick={() => setActivePanel(item.label)}>
-              <item.icon size={17} aria-hidden="true" />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-        <div className="index-card">
-          <div className="ring" style={{ '--progress': `${Math.round((indexProgress / ingestLabels.length) * 100)}%` } as CSSProperties} aria-label={`${Math.round((indexProgress / ingestLabels.length) * 100)} percent indexed`}>
-            {Math.round((indexProgress / ingestLabels.length) * 100)}%
-          </div>
-          <div>
-            <strong>Indexing</strong>
-            <span>Current task</span>
-            <b>{ingestLabels[Math.min(indexProgress, ingestLabels.length - 1)][0]}</b>
-            <small>Click refresh to advance</small>
-          </div>
-        </div>
-        <div className="profile">
-          <div className="avatar">AM</div>
-          <div>
-            <strong>Alex Morgan</strong>
-            <span>alex@acme.com</span>
-          </div>
-          <ChevronDown size={16} aria-hidden="true" />
-        </div>
-      </aside>
-
-      <div className="workspace">
-        <header className="workspace-header">
-          <div>
-            <h2>{activePanel}</h2>
-            <p>Engineering memory for acme/platform</p>
-          </div>
-          <div className="toolbar">
-            <button type="button" onClick={() => setActivePanel('Code')}>
-              <GitBranch size={16} aria-hidden="true" />
-              main
-              <ChevronDown size={14} aria-hidden="true" />
-            </button>
-            <button type="button" onClick={() => setActivePanel('Changes')}>
-              <Clock3 size={16} aria-hidden="true" />
-              Last 7 days
-              <ChevronDown size={14} aria-hidden="true" />
-            </button>
-            <button className="icon-button" type="button" aria-label="Refresh dashboard" onClick={advanceIndexing}>
-              <RefreshCw size={17} aria-hidden="true" />
-            </button>
-          </div>
-        </header>
-
-        <div className="dashboard-grid">
-          <section className="panel ask-panel" id="ask">
-            <PanelTitle icon={MessageSquareText} title="Ask" action="New question" onAction={() => setQuestion('')} />
-            <AskForm question={question} setQuestion={setQuestion} submitQuestion={submitQuestion} />
-            <div className="submitted-question">Current question: {submittedQuestion}</div>
-            <AnswerBlock answer={answer} selectedSource={selectedSource} setSelectedSource={setSelectedSource} />
-          </section>
-
-          <section className="panel memory-panel" id="memory">
-            <PanelTitle icon={History} title="Recent memory" action="Add memory" onAction={() => setActivePanel('Memory')} />
-            <MemoryTimeline memories={memories} updateMemory={updateMemory} memoryDraft={memoryDraft} setMemoryDraft={setMemoryDraft} addMemory={addMemory} />
-          </section>
-
-          <section className="panel graph-panel" id="code">
-            <PanelTitle icon={Network} title="Code graph" action="Run impact" subtle="impact preview" onAction={() => setActivePanel('Code')} />
-            <CodeGraph selectedNode={selectedNode} setSelectedNode={setSelectedNode} />
-            <ImpactSummary selectedGraphNode={selectedGraphNode} />
-          </section>
-        </div>
-
-        <IndexingStatus indexProgress={indexProgress} advanceIndexing={advanceIndexing} />
-        <section className="panel workbench">
-          <PanelTitle icon={BookOpen} title="Task workbench" action="Review selected PR" onAction={reviewSelectedChange} />
-          <ChangeTable changes={changes} selectedChange={selectedChange} setSelectedChange={setSelectedChange} />
-          <div className="detail-box">
-            <strong>{selectedChangeRow.pr}: {selectedChangeRow.title}</strong>
-            <p>Risk: {selectedChangeRow.risk}. Review generates candidate memories, stale-doc checks, and an impact note.</p>
-          </div>
-          <div className="activity-log">
-            {activityLog.map((entry) => <span key={entry}>{entry}</span>)}
-          </div>
-        </section>
-      </div>
-    </section>
-  )
-}
-
-function WorkflowSections({ setActivePanel, addLog }: { setActivePanel: (panel: string) => void; addLog: (entry: string) => void }) {
-  const steps = [
-    ['Connect', GitPullRequest, 'Settings'],
-    ['Understand', SquareCode, 'Code'],
-    ['Remember', BrainCircuit, 'Memory'],
-    ['Answer', MessageSquareText, 'Ask'],
-  ] as const
-
-  return (
-    <section className="feature-strip" id="features">
+    <section className="page-section">
       <div className="section-heading">
-        <h2>From source code to institutional memory.</h2>
-        <p>
-          ProjectMind combines code graph traversal, git history, PRs, issues,
-          architecture decisions, stored memories, and semantic retrieval before
-          an answer reaches the model.
-        </p>
+        <h2>Features</h2>
+        <p>Each feature is connected to an actual workflow in the app workspace.</p>
       </div>
-
-      <div className="process-rail">
-        {steps.map(([label, Icon, panel], index) => (
-          <button className="process-step" type="button" key={label} onClick={() => {
-            setActivePanel(panel)
-            addLog(`${label} workflow opened.`)
-            document.querySelector('#app')?.scrollIntoView({ behavior: 'smooth' })
-          }}>
-            <Icon size={22} aria-hidden="true" />
-            <span>{label}</span>
-            {index < 3 ? <ArrowRight size={18} aria-hidden="true" /> : null}
-          </button>
+      <div className="feature-grid">
+        {featureList.map(([title, text]) => (
+          <article className="feature-panel" key={title}>
+            <Sparkles size={22} />
+            <h3>{title}</h3>
+            <p>{text}</p>
+          </article>
         ))}
       </div>
-
-      <div className="feature-grid">
-        <FeaturePanel icon={Layers3} title="Memory lifecycle" text="Approve, reject, or supersede candidate memories from the dashboard." />
-        <FeaturePanel icon={AlertTriangle} title="Contradiction detection" text="Select changes to surface stale docs and conflicting memory candidates." />
-        <FeaturePanel icon={ShieldCheck} title="Governed truth" text="Every answer links to source evidence and confidence before it becomes project memory." />
-      </div>
     </section>
   )
 }
 
-function AuthAndOnboarding({
-  authStatus,
-  connect,
-  authMode,
-  setAuthMode,
-  authEmail,
-  setAuthEmail,
-  authName,
-  setAuthName,
-  authPassword,
-  setAuthPassword,
-  indexProgress,
-  advanceIndexing,
-  changes,
-  selectedChange,
-  setSelectedChange,
-  selectedChangeRow,
-  reviewSelectedChange,
-}: {
-  authStatus: string
-  connect: (provider: AuthProvider) => void
-  authMode: AuthMode
-  setAuthMode: (mode: AuthMode) => void
-  authEmail: string
-  setAuthEmail: (value: string) => void
-  authName: string
-  setAuthName: (value: string) => void
-  authPassword: string
-  setAuthPassword: (value: string) => void
-  indexProgress: number
-  advanceIndexing: () => void
-  changes: Change[]
-  selectedChange: string
-  setSelectedChange: (pr: string) => void
-  selectedChangeRow: Change
-  reviewSelectedChange: () => void
-}) {
+function DocsPage() {
   return (
-    <section className="operations-band" id="onboarding">
-      <div className="auth-panel" id="login">
-        <PanelTitle icon={LockKeyhole} title={authMode === 'signup' ? 'Create account' : 'Sign in'} />
-        <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
-          <button className={authMode === 'signup' ? 'active' : ''} type="button" onClick={() => setAuthMode('signup')}>Signup</button>
-          <button className={authMode === 'signin' ? 'active' : ''} type="button" onClick={() => setAuthMode('signin')}>Signin</button>
-        </div>
-        <button className="button primary full" type="button" onClick={() => connect('GitHub')}>
-          <GitPullRequest size={18} aria-hidden="true" />
-          {authMode === 'signup' ? 'Signup with GitHub' : 'Signin with GitHub'}
-        </button>
-        <button className="button secondary full" type="button" onClick={() => connect('Google')}>
-          <UserRound size={18} aria-hidden="true" />
-          {authMode === 'signup' ? 'Signup with Google' : 'Signin with Google'}
-        </button>
-        <form className="auth-form" onSubmit={(event) => {
-          event.preventDefault()
-          connect('email')
-        }}>
-          {authMode === 'signup' ? (
-            <input value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder="Full name" />
-          ) : null}
-          <input value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="Email" type="email" />
-          <input value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Password" type="password" />
-          <button className="button secondary full" type="submit">
-            <KeyRound size={18} aria-hidden="true" />
-            {authMode === 'signup' ? 'Create email account' : 'Signin with email'}
-          </button>
-        </form>
-        <p>Status: {authStatus}</p>
-      </div>
-
-      <div className="onboarding-panel">
-        <PanelTitle icon={Boxes} title="Repository indexing" action="Run next task" onAction={advanceIndexing} />
-        <IngestList indexProgress={indexProgress} />
-      </div>
-
-      <div className="changes-panel">
-        <PanelTitle icon={BookOpen} title="Change intelligence" action={selectedChangeRow.reviewed ? 'Reviewed' : 'Review'} onAction={reviewSelectedChange} />
-        <ChangeTable changes={changes} selectedChange={selectedChange} setSelectedChange={setSelectedChange} />
-      </div>
-    </section>
-  )
-}
-
-function DocsSection() {
-  return (
-    <section className="docs-section" id="docs">
+    <section className="page-section docs-section">
       <div className="section-heading">
-        <h2>Docs: what ProjectMind can do.</h2>
-        <p>
-          This documentation section lists the working product capabilities in
-          the prototype and the production integration points needed for a full SaaS launch.
-        </p>
+        <h2>Docs</h2>
+        <p>How ProjectMind works in this prototype, and what a production OAuth/backend setup adds.</p>
       </div>
       <div className="docs-layout">
-        <aside className="docs-nav" aria-label="Docs contents">
-          {docsFeatures.map(([title]) => <a href={`#doc-${title.toLowerCase().replaceAll(' ', '-')}`} key={title}>{title}</a>)}
+        <aside className="docs-nav">
+          {demoSteps.map(([title]) => <a href={`#${title.toLowerCase().replaceAll(' ', '-')}`} key={title}>{title}</a>)}
+          <a href="#oauth">OAuth setup</a>
         </aside>
         <div className="docs-content">
-          {docsFeatures.map(([title, body]) => (
-            <article className="doc-row" id={`doc-${title.toLowerCase().replaceAll(' ', '-')}`} key={title}>
+          {demoSteps.map(([title, body]) => (
+            <article className="doc-row" id={title.toLowerCase().replaceAll(' ', '-')} key={title}>
               <h3>{title}</h3>
               <p>{body}</p>
             </article>
           ))}
-          <article className="doc-row setup">
+          <article className="doc-row setup" id="oauth">
             <h3>OAuth setup</h3>
             <p>
-              To make the GitHub and Google buttons redirect to real providers, add
-              <code>VITE_GITHUB_CLIENT_ID</code> and <code>VITE_GOOGLE_CLIENT_ID</code>
-              to <code>.env.local</code>. A production app also needs a backend callback
-              to exchange OAuth codes for secure sessions.
+              Add <code>VITE_GITHUB_CLIENT_ID</code> and <code>VITE_GOOGLE_CLIENT_ID</code> in <code>.env.local</code> to launch real provider sign-in.
+              A production app also needs backend routes like <code>/auth/github/callback</code> and <code>/auth/google/callback</code> to exchange OAuth codes,
+              store sessions, and safely access private repositories.
             </p>
           </article>
         </div>
@@ -978,7 +419,64 @@ function DocsSection() {
   )
 }
 
-function DemoSection({
+function LoginPage({
+  authMode,
+  setAuthMode,
+  authStatus,
+  name,
+  setName,
+  email,
+  setEmail,
+  password,
+  setPassword,
+  signIn,
+}: {
+  authMode: AuthMode
+  setAuthMode: (mode: AuthMode) => void
+  authStatus: string
+  name: string
+  setName: (value: string) => void
+  email: string
+  setEmail: (value: string) => void
+  password: string
+  setPassword: (value: string) => void
+  signIn: (provider: AuthProvider) => void
+}) {
+  return (
+    <section className="page-section login-page">
+      <div className="auth-panel login-card">
+        <PanelTitle icon={LockKeyhole} title={authMode === 'signup' ? 'Create account' : 'Sign in'} />
+        <div className="auth-tabs">
+          <button className={authMode === 'signup' ? 'active' : ''} type="button" onClick={() => setAuthMode('signup')}>Signup</button>
+          <button className={authMode === 'signin' ? 'active' : ''} type="button" onClick={() => setAuthMode('signin')}>Signin</button>
+        </div>
+        <button className="button primary full" type="button" onClick={() => signIn('GitHub')}>
+          <GitPullRequest size={18} />
+          {authMode === 'signup' ? 'Signup with GitHub' : 'Signin with GitHub'}
+        </button>
+        <button className="button secondary full" type="button" onClick={() => signIn('Google')}>
+          <UserRound size={18} />
+          {authMode === 'signup' ? 'Signup with Google' : 'Signin with Google'}
+        </button>
+        <form className="auth-form" onSubmit={(event) => {
+          event.preventDefault()
+          signIn('email')
+        }}>
+          {authMode === 'signup' ? <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Full name" /> : null}
+          <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" type="email" />
+          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" />
+          <button className="button secondary full" type="submit">
+            <KeyRound size={18} />
+            {authMode === 'signup' ? 'Create email account' : 'Signin with email'}
+          </button>
+        </form>
+        <p>Status: {authStatus}</p>
+      </div>
+    </section>
+  )
+}
+
+function DemoPage({
   demoPlaying,
   setDemoPlaying,
   demoStep,
@@ -989,324 +487,385 @@ function DemoSection({
   demoStep: number
   setDemoStep: (step: number) => void
 }) {
-  const current = demoSteps[demoStep]
-
+  const [title, body] = demoSteps[demoStep]
   return (
-    <section className="demo-section" id="demo">
+    <section className="page-section demo-section">
       <div className="section-heading">
         <h2>Watch Demo</h2>
-        <p>A live in-browser demo video showing the ProjectMind workflow from repository connection to impact analysis.</p>
+        <p>A live product walkthrough shown as an in-browser video player.</p>
       </div>
-      <div className="demo-player" aria-label="Live ProjectMind demo video">
-        <div className="demo-stage">
-          <div className="demo-video-bar">
-            <span>ProjectMind live demo</span>
-            <strong>{String(demoStep + 1).padStart(2, '0')} / {String(demoSteps.length).padStart(2, '0')}</strong>
+      <div className="demo-player">
+        <div className="demo-video-bar">
+          <span>ProjectMind live demo</span>
+          <strong>{demoStep + 1} / {demoSteps.length}</strong>
+        </div>
+        <div className="demo-frame">
+          <div className="demo-sidebar">
+            {demoSteps.map(([stepTitle], index) => (
+              <button className={index === demoStep ? 'active' : ''} type="button" key={stepTitle} onClick={() => setDemoStep(index)}>
+                {index + 1}. {stepTitle}
+              </button>
+            ))}
           </div>
-          <div className="demo-frame">
-            <div className="demo-sidebar">
-              {demoSteps.map((step, index) => (
-                <button className={index === demoStep ? 'active' : ''} type="button" key={step.title} onClick={() => setDemoStep(index)}>
-                  {index + 1}. {step.title}
-                </button>
-              ))}
-            </div>
-            <div className="demo-scene">
-              <Sparkles size={24} aria-hidden="true" />
-              <h3>{current.title}</h3>
-              <p>{current.body}</p>
-              <div className="demo-metric">{current.metric}</div>
-              <div className="demo-progress">
-                {demoSteps.map((step, index) => <i className={index <= demoStep ? 'active' : ''} key={step.title} />)}
-              </div>
+          <div className="demo-scene">
+            <Sparkles size={28} />
+            <h3>{title}</h3>
+            <p>{body}</p>
+            <div className="demo-progress">
+              {demoSteps.map(([stepTitle], index) => <i className={index <= demoStep ? 'active' : ''} key={stepTitle} />)}
             </div>
           </div>
-          <div className="demo-controls">
-            <button className="button primary" type="button" onClick={() => setDemoPlaying(!demoPlaying)}>
-              {demoPlaying ? <Pause size={17} aria-hidden="true" /> : <Play size={17} aria-hidden="true" />}
-              {demoPlaying ? 'Pause demo' : 'Play demo'}
-            </button>
-            <button className="button secondary" type="button" onClick={() => setDemoStep((demoStep + 1) % demoSteps.length)}>
-              Next scene
-              <ArrowRight size={16} aria-hidden="true" />
-            </button>
-          </div>
+        </div>
+        <div className="demo-controls">
+          <button className="button primary" type="button" onClick={() => setDemoPlaying(!demoPlaying)}>
+            {demoPlaying ? <Pause size={17} /> : <Play size={17} />}
+            {demoPlaying ? 'Pause demo' : 'Play demo'}
+          </button>
+          <button className="button secondary" type="button" onClick={() => setDemoStep((demoStep + 1) % demoSteps.length)}>
+            Next scene
+            <ArrowRight size={16} />
+          </button>
         </div>
       </div>
     </section>
   )
 }
 
-function FooterCta() {
-  return (
-    <footer className="footer-cta">
-      <div>
-        <h2>Give your codebase a memory.</h2>
-        <p>Turn PRs, issues, commits, decisions, bugs, and architecture into an auditable engineering brain.</p>
-      </div>
-      <button className="button primary large" type="button" onClick={() => scrollToSection('login')}>
-        <GitPullRequest size={20} aria-hidden="true" />
-        Connect GitHub
-      </button>
-    </footer>
-  )
-}
-
-function PanelTitle({
-  icon: Icon,
-  title,
-  action,
-  onAction,
-  actionIcon: ActionIcon,
-  subtle,
-}: {
-  icon: IconType
-  title: string
-  action?: string
-  onAction?: () => void
-  actionIcon?: IconType
-  subtle?: string
-}) {
-  return (
-    <div className="panel-title">
-      <div>
-        <Icon size={17} aria-hidden="true" />
-        <h3>{title}</h3>
-        {subtle ? <span>{subtle}</span> : null}
-      </div>
-      {action ? <button type="button" onClick={onAction}>{action}</button> : null}
-      {ActionIcon ? <ActionIcon size={17} aria-hidden="true" /> : null}
-    </div>
-  )
-}
-
-function AskForm({
+function WorkspacePage({
+  activeStep,
+  repoUrl,
+  setRepoUrl,
+  connectStatus,
+  isIndexing,
+  connectAndIndexRepository,
+  repoIndex,
+  stats,
   question,
   setQuestion,
-  submitQuestion,
-  compact = false,
+  askRepository,
+  answer,
+  evidence,
+  memories,
+  approveMemory,
+  selectedFile,
+  setSelectedFile,
+  runImpact,
+  impact,
+  activityLog,
 }: {
+  activeStep: WorkflowStep
+  repoUrl: string
+  setRepoUrl: (value: string) => void
+  connectStatus: string
+  isIndexing: boolean
+  connectAndIndexRepository: (event?: FormEvent) => void
+  repoIndex: RepoIndex | null
+  stats: { files: number; commits: number; symbols: number; docs: number }
   question: string
   setQuestion: (value: string) => void
-  submitQuestion: (event: FormEvent) => void
-  compact?: boolean
+  askRepository: (event: FormEvent) => void
+  answer: string
+  evidence: Evidence[]
+  memories: Evidence[]
+  approveMemory: () => void
+  selectedFile: string
+  setSelectedFile: (value: string) => void
+  runImpact: () => void
+  impact: ReturnType<typeof analyzeImpact> | null
+  activityLog: string[]
 }) {
   return (
-    <form className={compact ? 'ask-form compact' : 'ask-form'} onSubmit={submitQuestion}>
-      <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about architecture, history, bugs, or impact" />
-      <button type="submit" aria-label="Ask ProjectMind">
-        <Search size={15} aria-hidden="true" />
-      </button>
-    </form>
-  )
-}
-
-function AnswerBlock({
-  answer,
-  selectedSource,
-  setSelectedSource,
-  compact = false,
-}: {
-  answer: Answer
-  selectedSource: number
-  setSelectedSource: (index: number) => void
-  compact?: boolean
-}) {
-  const sources = answer.sources
-  const activeSource = sources[Math.min(selectedSource, sources.length - 1)]
-
-  return (
-    <div className={compact ? 'answer-block compact' : 'answer-block'}>
-      <h4>{answer.title}</h4>
-      <p>{answer.body}</p>
-      <ul className="checks">
-        {answer.checks.map((check) => <li key={check}><Check size={15} /> {check}</li>)}
-      </ul>
-      <div className="source-header">
-        <strong>Sources ({sources.length})</strong>
-        <span>Confidence {answer.confidence}</span>
-      </div>
-      <div className="source-list">
-        {sources.map((source, index) => (
-          <button className={selectedSource === index ? 'source-row selected' : 'source-row'} type="button" key={source.title} onClick={() => setSelectedSource(index)}>
-            <FileCode2 size={14} aria-hidden="true" />
-            <span>{source.title}</span>
-            <small>{source.kind}</small>
-            <b>{source.confidence}</b>
-          </button>
-        ))}
-      </div>
-      <div className="detail-box">
-        <strong>{activeSource.title}</strong>
-        <p>{activeSource.detail}</p>
-      </div>
-    </div>
-  )
-}
-
-function MemoryTimeline({
-  memories,
-  updateMemory,
-  memoryDraft,
-  setMemoryDraft,
-  addMemory,
-}: {
-  memories: Memory[]
-  updateMemory: (id: number, state: MemoryState) => void
-  memoryDraft: string
-  setMemoryDraft: (value: string) => void
-  addMemory: (event: FormEvent) => void
-}) {
-  return (
-    <div className="timeline">
-      <form className="memory-form" onSubmit={addMemory}>
-        <input value={memoryDraft} onChange={(event) => setMemoryDraft(event.target.value)} placeholder="Add a memory the project should remember" />
-        <button type="submit">Add</button>
-      </form>
-      {memories.map((memory) => (
-        <article className={`timeline-row ${memory.state}`} key={memory.id}>
-          <div className="timeline-pin" aria-hidden="true" />
-          <time>{memory.date}</time>
+    <section className="app-frame app-frame-live">
+      <aside className="sidebar">
+        <div className="sidebar-brand"><BrainCircuit size={22} /> ProjectMind</div>
+        <nav className="app-nav">
+          {demoSteps.map(([title], index) => {
+            const step = ['connect', 'index', 'ask', 'memory', 'impact'][index] as WorkflowStep
+            return <button className={activeStep === step ? 'active' : ''} type="button" key={title}>{index + 1}. {title}</button>
+          })}
+        </nav>
+        <div className="index-card">
+          <div className="ring">{repoIndex ? '100%' : isIndexing ? '50%' : '0%'}</div>
           <div>
-            <h4>{memory.title}</h4>
-            <p>{memory.body}</p>
-            {memory.state === 'pending' ? (
-              <div className="row-actions">
-                <button type="button" onClick={() => updateMemory(memory.id, 'approved')}>Approve</button>
-                <button type="button" onClick={() => updateMemory(memory.id, 'rejected')}>Reject</button>
+            <strong>{repoIndex ? `${repoIndex.owner}/${repoIndex.repo}` : 'No repository'}</strong>
+            <span>{connectStatus}</span>
+          </div>
+        </div>
+      </aside>
+      <div className="workspace">
+        <header className="workspace-header">
+          <div>
+            <h2>Repository Workspace</h2>
+            <p>{repoIndex ? `Indexed ${repoIndex.owner}/${repoIndex.repo} on ${repoIndex.branch}` : 'Connect a public GitHub repository to begin.'}</p>
+          </div>
+        </header>
+
+        <div className="live-grid">
+          <section className="panel">
+            <PanelTitle icon={GitPullRequest} title="1. Connect a repository" />
+            <form className="repo-form" onSubmit={connectAndIndexRepository}>
+              <input value={repoUrl} onChange={(event) => setRepoUrl(event.target.value)} placeholder="https://github.com/owner/repo" />
+              <button className="button primary" type="submit" disabled={isIndexing}>{isIndexing ? 'Indexing...' : 'Connect and index'}</button>
+            </form>
+            <p className="status-line">{connectStatus}</p>
+          </section>
+
+          <section className="panel">
+            <PanelTitle icon={Activity} title="2. Index code and history" />
+            <div className="status-grid compact-status">
+              <StatusCard label="Files" value={String(stats.files)} />
+              <StatusCard label="Commits" value={String(stats.commits)} />
+              <StatusCard label="Symbols" value={String(stats.symbols)} />
+              <StatusCard label="Docs" value={String(stats.docs)} />
+            </div>
+          </section>
+
+          <section className="panel ask-panel">
+            <PanelTitle icon={MessageSquareText} title="3. Ask why" />
+            <form className="ask-form" onSubmit={askRepository}>
+              <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask anything about the indexed repository" />
+              <button type="submit"><Search size={15} /></button>
+            </form>
+            <div className="answer-block">
+              <h4>Answer</h4>
+              <p>{answer}</p>
+              <EvidenceList evidence={evidence} />
+            </div>
+          </section>
+
+          <section className="panel memory-panel">
+            <PanelTitle icon={History} title="4. Review memory" action="Approve current answer" onAction={approveMemory} />
+            <div className="memory-list">
+              {memories.map((memory) => <EvidenceCard evidence={memory} key={`${memory.title}-${memory.detail}`} />)}
+            </div>
+          </section>
+
+          <section className="panel graph-panel">
+            <PanelTitle icon={Network} title="5. Run impact analysis" action="Run impact" onAction={runImpact} />
+            <select className="file-select" value={selectedFile} onChange={(event) => setSelectedFile(event.target.value)}>
+              {(repoIndex?.files ?? []).map((file) => <option value={file.path} key={file.path}>{file.path}</option>)}
+            </select>
+            {impact ? (
+              <div className="impact-summary">
+                <strong>{impact.file}</strong>
+                <div>
+                  <span>Risk</span><b className={impact.risk.toLowerCase()}>{impact.risk}</b>
+                  <span>Related files</span><b>{impact.related.length}</b>
+                  <span>Tests</span><b>{impact.tests.length}</b>
+                </div>
+                <p>{impact.summary}</p>
+                <EvidenceList evidence={impact.related.slice(0, 4).map((file) => ({ title: file, kind: 'related_file', confidence: '72%', detail: `Shares directory, imports, or naming relationship with ${impact.file}.` }))} />
               </div>
-            ) : null}
-          </div>
-          <span>{memory.state}</span>
-        </article>
-      ))}
-    </div>
-  )
-}
+            ) : <p className="status-line">Select a file after indexing, then run impact analysis.</p>}
+          </section>
 
-function CodeGraph({
-  selectedNode,
-  setSelectedNode,
-  compact = false,
-}: {
-  selectedNode: string
-  setSelectedNode: (id: string) => void
-  compact?: boolean
-}) {
-  return (
-    <div className={compact ? 'code-graph compact' : 'code-graph'}>
-      {graphNodes.map((node) => (
-        <button className={`node ${node.className} ${selectedNode === node.id ? 'selected' : ''}`} type="button" key={node.id} onClick={() => setSelectedNode(node.id)}>
-          {node.label}<span>{node.file}</span>
-        </button>
-      ))}
-      <svg viewBox="0 0 560 320" className="graph-lines" aria-hidden="true">
-        <path d="M280 155 L280 68" />
-        <path d="M334 160 L462 102" />
-        <path d="M333 177 L468 224" />
-        <path d="M280 195 L280 268" />
-        <path d="M226 176 L99 177" />
-      </svg>
-      <div className="legend">
-        <span><i /> Direct dependency</span>
-        <span><i className="muted" /> Indirect dependency</span>
-      </div>
-    </div>
-  )
-}
-
-function ImpactSummary({ selectedGraphNode }: { selectedGraphNode: typeof graphNodes[number] }) {
-  return (
-    <div className="impact-summary">
-      <strong>{selectedGraphNode.label} impact</strong>
-      <div>
-        <span>Risk</span><b className={selectedGraphNode.risk.toLowerCase()}>{selectedGraphNode.risk}</b>
-        <span>Tests</span><b>{selectedGraphNode.tests}</b>
-        <span>Endpoints</span><b>3</b>
-      </div>
-      <p>Run auth, session, and rate-limit checks before changing {selectedGraphNode.file}.</p>
-    </div>
-  )
-}
-
-function IndexingStatus({ indexProgress, advanceIndexing }: { indexProgress: number; advanceIndexing: () => void }) {
-  const percent = Math.round((indexProgress / ingestLabels.length) * 100)
-  const cards = [
-    ['Repositories', '12', '12 active'],
-    ['Files indexed', indexProgress > 0 ? '87,231' : '0', `${percent}%`],
-    ['Code embeddings', indexProgress > 5 ? '24.3M' : '13.1M', `${percent}%`],
-    ['Commits processed', indexProgress > 3 ? '18,912' : '8,402', 'Last 7 days'],
-    ['Docs indexed', indexProgress > 4 ? '1,284' : '612', 'Last 7 days'],
-    ['Health', indexProgress === ingestLabels.length ? 'Ready' : 'Indexing', indexProgress === ingestLabels.length ? 'All systems healthy' : 'Worker active'],
-  ]
-
-  return (
-    <section className="panel indexing-status">
-      <PanelTitle icon={Activity} title="Indexing status" action="Run next task" onAction={advanceIndexing} />
-      <IngestList indexProgress={indexProgress} />
-      <div className="status-grid">
-        {cards.map(([label, value, detail], index) => (
-          <div className="status-card" key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
-            <small>{detail}</small>
-            {index > 0 && index < 5 ? <div className="mini-bar"><i style={{ width: `${percent}%` }} /></div> : null}
-            {index === 5 ? <div className="health-dot"><Check size={13} /> {detail}</div> : null}
-          </div>
-        ))}
+          <section className="panel workbench">
+            <PanelTitle icon={BookOpen} title="Activity" />
+            <div className="activity-log">{activityLog.map((entry) => <span key={entry}>{entry}</span>)}</div>
+          </section>
+        </div>
       </div>
     </section>
   )
 }
 
-function IngestList({ indexProgress }: { indexProgress: number }) {
+function PanelTitle({ icon: Icon, title, action, onAction }: { icon: typeof Activity; title: string; action?: string; onAction?: () => void }) {
   return (
-    <div className="ingest-list">
-      {ingestLabels.map(([label, value], index) => {
-        const state = index < indexProgress ? 'complete' : index === indexProgress ? 'active' : 'pending'
-        return (
-          <div className={`ingest-row ${state}`} key={label}>
-            {state === 'complete' ? <Check size={16} /> : state === 'active' ? <CircleDot size={16} /> : <Clock3 size={16} />}
-            <span>{label}</span>
-            <strong>{state === 'pending' ? 'Waiting' : value}</strong>
-          </div>
-        )
-      })}
+    <div className="panel-title">
+      <div><Icon size={17} /><h3>{title}</h3></div>
+      {action ? <button type="button" onClick={onAction}>{action}</button> : null}
     </div>
   )
 }
 
-function ChangeTable({
-  changes,
-  selectedChange,
-  setSelectedChange,
-}: {
-  changes: Change[]
-  selectedChange: string
-  setSelectedChange: (pr: string) => void
-}) {
+function StatusCard({ label, value }: { label: string; value: string }) {
+  return <div className="status-card"><span>{label}</span><strong>{value}</strong></div>
+}
+
+function EvidenceList({ evidence }: { evidence: Evidence[] }) {
+  if (evidence.length === 0) return null
   return (
-    <div className="change-table">
-      {changes.map((change) => (
-        <button className={selectedChange === change.pr ? 'change-row selected' : 'change-row'} type="button" key={change.pr} onClick={() => setSelectedChange(change.pr)}>
-          <span>{change.pr}</span>
-          <strong>{change.title}</strong>
-          <em className={change.risk.toLowerCase()}>{change.risk}</em>
-          <small>{change.reviewed ? 'reviewed' : change.memory}</small>
-        </button>
-      ))}
+    <div className="source-list">
+      {evidence.map((item) => <EvidenceCard evidence={item} key={`${item.title}-${item.kind}`} />)}
     </div>
   )
 }
 
-function FeaturePanel({ icon: Icon, title, text }: { icon: IconType; title: string; text: string }) {
+function EvidenceCard({ evidence }: { evidence: Evidence }) {
   return (
-    <article className="feature-panel">
-      <Icon size={22} aria-hidden="true" />
-      <h3>{title}</h3>
-      <p>{text}</p>
+    <article className="source-row evidence-card">
+      <FileCode2 size={14} />
+      <span>{evidence.title}</span>
+      <small>{evidence.kind}</small>
+      <b>{evidence.confidence}</b>
+      <p>{evidence.detail}</p>
     </article>
   )
+}
+
+function parseGitHubUrl(input: string) {
+  const match = input.trim().match(/github\.com[:/](?<owner>[^/\s]+)\/(?<repo>[^/\s#?]+?)(?:\.git)?(?:[/?#].*)?$/i)
+  if (!match?.groups) return null
+  return { owner: match.groups.owner, repo: match.groups.repo.replace(/\.git$/i, '') }
+}
+
+async function buildRepoIndex(owner: string, repo: string): Promise<RepoIndex> {
+  const repoResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}`)
+  if (!repoResponse.ok) throw new Error(`GitHub could not load ${owner}/${repo}. Make sure it is public or add a backend OAuth token flow.`)
+  const repoData = await repoResponse.json() as { default_branch: string }
+  const branch = repoData.default_branch
+
+  const treeResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`)
+  if (!treeResponse.ok) throw new Error('GitHub tree API failed while indexing repository files.')
+  const treeData = await treeResponse.json() as { tree: Array<{ path: string; type: string; size?: number }> }
+  const candidates = treeData.tree
+    .filter((item) => item.type === 'blob' && (item.size ?? 0) <= 80000 && isIndexableFile(item.path))
+    .slice(0, 55)
+
+  const files = (await Promise.all(candidates.map(async (item) => {
+    try {
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${item.path}`
+      const response = await fetch(rawUrl)
+      if (!response.ok) return null
+      const text = await response.text()
+      return { path: item.path, text: text.slice(0, 60000), size: item.size ?? text.length }
+    } catch {
+      return null
+    }
+  }))).filter(Boolean) as RepoFile[]
+
+  const commitsResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?per_page=20`)
+  const commitData = commitsResponse.ok ? await commitsResponse.json() as Array<{
+    sha: string
+    commit: { message: string; author?: { name?: string; date?: string } }
+  }> : []
+  const commits = commitData.map((item) => ({
+    sha: item.sha.slice(0, 7),
+    message: item.commit.message.split('\n')[0],
+    author: item.commit.author?.name ?? 'unknown',
+    date: item.commit.author?.date ?? '',
+  }))
+
+  return { owner, repo, branch, files, commits, indexedAt: new Date().toISOString() }
+}
+
+function answerFromIndex(question: string, index: RepoIndex, memories: Evidence[]) {
+  const terms = tokenize(question)
+  const scoredFiles = index.files
+    .map((file) => ({ file, score: scoreText(`${file.path}\n${file.text}`, terms) + (isDocFile(file.path) ? 2 : 0) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+
+  const scoredCommits = index.commits
+    .map((commit) => ({ commit, score: scoreText(commit.message, terms) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+
+  const evidence: Evidence[] = [
+    ...scoredFiles.map(({ file, score }) => ({
+      title: file.path,
+      kind: isDocFile(file.path) ? 'doc_or_readme' : 'code',
+      confidence: `${Math.min(95, 55 + score * 6)}%`,
+      detail: summarizeFileMatch(file, terms),
+    })),
+    ...scoredCommits.map(({ commit, score }) => ({
+      title: `${commit.sha} ${commit.message}`,
+      kind: 'commit',
+      confidence: `${Math.min(90, 52 + score * 7)}%`,
+      detail: `Commit by ${commit.author}${commit.date ? ` on ${new Date(commit.date).toLocaleDateString()}` : ''}.`,
+    })),
+    ...memories.filter((memory) => scoreText(`${memory.title} ${memory.detail}`, terms) > 0).slice(0, 2),
+  ].slice(0, 6)
+
+  if (evidence.length === 0) {
+    return {
+      answer: `I indexed ${index.files.length} files and ${index.commits.length} commits from ${index.owner}/${index.repo}, but I did not find strong evidence for "${question}". Try naming a file, dependency, feature, module, error, or term that exists in the repository.`,
+      evidence: [
+        { title: `${index.owner}/${index.repo}`, kind: 'repository', confidence: '100%', detail: 'Repository is indexed, but no matching file or commit ranked highly for this question.' },
+      ],
+    }
+  }
+
+  const topFiles = scoredFiles.map(({ file }) => file.path).slice(0, 3)
+  const topCommits = scoredCommits.map(({ commit }) => `${commit.sha} ${commit.message}`).slice(0, 2)
+  const intent = detectIntent(question)
+  const answer = [
+    `Based on the indexed ${index.owner}/${index.repo} repository, this looks like a ${intent} question.`,
+    topFiles.length ? `The strongest evidence is in ${topFiles.join(', ')}.` : '',
+    topCommits.length ? `Recent related history includes ${topCommits.join('; ')}.` : '',
+    `I found ${evidence.length} evidence item${evidence.length === 1 ? '' : 's'} and ranked them by file path, content, commit message, and approved memory matches.`,
+  ].filter(Boolean).join(' ')
+
+  return { answer, evidence }
+}
+
+function analyzeImpact(file: RepoFile, files: RepoFile[]) {
+  const directory = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''
+  const base = file.path.split('/').pop()?.replace(/\.[^.]+$/, '').toLowerCase() ?? ''
+  const imports = [...file.text.matchAll(/from ['"]([^'"]+)['"]|import\s+[^'"]*['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\)/g)]
+    .map((match) => match[1] ?? match[2] ?? match[3])
+    .filter(Boolean)
+
+  const related = files
+    .filter((candidate) => candidate.path !== file.path)
+    .filter((candidate) => {
+      const candidateLower = candidate.path.toLowerCase()
+      return (!!directory && candidate.path.startsWith(directory)) || (!!base && candidateLower.includes(base)) || imports.some((item) => candidateLower.includes(item.replace('../', '').replace('./', '').toLowerCase()))
+    })
+    .map((candidate) => candidate.path)
+    .slice(0, 12)
+
+  const tests = files.filter((candidate) => /test|spec|__tests__/i.test(candidate.path) && (candidate.path.toLowerCase().includes(base) || candidate.path.startsWith(directory))).map((candidate) => candidate.path)
+  const risk = related.length > 8 || imports.length > 8 ? 'High' : related.length > 3 || imports.length > 3 ? 'Medium' : 'Low'
+
+  return {
+    file: file.path,
+    risk,
+    related,
+    tests,
+    summary: `${file.path} imports ${imports.length} module${imports.length === 1 ? '' : 's'} and has ${related.length} nearby or related file${related.length === 1 ? '' : 's'}. ${tests.length ? `${tests.length} possible test file${tests.length === 1 ? '' : 's'} found.` : 'No obvious test file was found in the indexed set.'}`,
+  }
+}
+
+function detectIntent(question: string) {
+  const lower = question.toLowerCase()
+  if (lower.includes('why') || lower.includes('decision')) return 'decision/history'
+  if (lower.includes('break') || lower.includes('impact') || lower.includes('change')) return 'impact'
+  if (lower.includes('bug') || lower.includes('error')) return 'bug/history'
+  if (lower.includes('setup') || lower.includes('run') || lower.includes('install')) return 'setup'
+  if (lower.includes('architecture') || lower.includes('structure')) return 'architecture'
+  return 'repository understanding'
+}
+
+function summarizeFileMatch(file: RepoFile, terms: string[]) {
+  const lines = file.text.split('\n')
+  const found = lines.find((line) => terms.some((term) => line.toLowerCase().includes(term)))
+  if (found) return found.trim().slice(0, 240)
+  return `${file.path} matched by path or repository context. Size: ${file.size} bytes.`
+}
+
+function scoreText(text: string, terms: string[]) {
+  const lower = text.toLowerCase()
+  return terms.reduce((score, term) => score + (lower.includes(term) ? 1 : 0), 0)
+}
+
+function tokenize(text: string) {
+  return text.toLowerCase().split(/[^a-z0-9_./-]+/).filter((term) => term.length > 2 && !['what', 'why', 'how', 'the', 'and', 'for', 'this', 'that', 'does', 'with', 'from'].includes(term)).slice(0, 12)
+}
+
+function isDocFile(path: string) {
+  return /(^|\/)(readme|docs?|adr|architecture|changelog)|\.(md|mdx|txt|rst)$/i.test(path)
+}
+
+function isIndexableFile(path: string) {
+  if (/(^|\/)(node_modules|dist|build|coverage|vendor|\.git|public\/assets)(\/|$)/i.test(path)) return false
+  return /\.(ts|tsx|js|jsx|py|go|rs|java|cs|php|rb|json|md|mdx|yml|yaml|toml|txt|css|scss|html|sql)$/i.test(path)
+}
+
+function estimateSymbols(files: RepoFile[]) {
+  return files.reduce((total, file) => total + (file.text.match(/\b(function|class|const|let|var|def|interface|type|enum|struct)\b/g)?.length ?? 0), 0)
 }
 
 export default App
