@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, useMemo, useState } from 'react'
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   LockKeyhole,
   MessageSquareText,
   Network,
+  Pause,
   Play,
   RefreshCw,
   Search,
@@ -49,6 +50,15 @@ type Change = {
   risk: 'Low' | 'Medium' | 'High'
   memory: string
   reviewed: boolean
+}
+
+type AuthProvider = 'GitHub' | 'Google' | 'email'
+type AuthMode = 'signup' | 'signin'
+
+type DemoStep = {
+  title: string
+  body: string
+  metric: string
 }
 
 const navItems: Array<{ label: string; icon: IconType }> = [
@@ -135,6 +145,68 @@ const changeSeed: Change[] = [
   { pr: 'PR #221', title: 'Refactor auth middleware', risk: 'Low', memory: '1 decision', reviewed: true },
 ]
 
+const docsFeatures = [
+  ['Authentication', 'Signup, signin, GitHub OAuth launch, Google OAuth launch, and local email-session demo.'],
+  ['GitHub connection', 'Repository-first onboarding with OAuth configuration checks and repository selection state.'],
+  ['Repository indexing', 'Visible ingestion tasks for files, symbols, dependencies, commits, PRs, memories, and graph creation.'],
+  ['Ask repository', 'Question form that changes answer strategy for decisions, impact, history, and database questions.'],
+  ['Evidence citations', 'Clickable sources with source type, confidence, and provenance detail.'],
+  ['Memory explorer', 'Manual memory creation plus approval and rejection for candidate memories.'],
+  ['Code graph', 'Clickable dependency graph with selected module state.'],
+  ['Impact analysis', 'Risk, affected endpoints, and test count update from selected graph node.'],
+  ['Change intelligence', 'PR selection and review workflow that queues memory candidates.'],
+  ['Activity log', 'Every user action writes a visible operational trace in the workbench.'],
+]
+
+const demoSteps: DemoStep[] = [
+  {
+    title: 'Connect a repository',
+    body: 'ProjectMind starts with GitHub authorization, workspace selection, and repository sync.',
+    metric: '12 repositories found',
+  },
+  {
+    title: 'Index code and history',
+    body: 'The worker extracts files, symbols, dependencies, commits, PRs, issues, and docs.',
+    metric: '14,481 symbols extracted',
+  },
+  {
+    title: 'Ask why',
+    body: 'A developer asks why Redis exists and receives an evidence-backed answer.',
+    metric: '4 citations ranked',
+  },
+  {
+    title: 'Review memory',
+    body: 'The team approves durable memories instead of letting AI silently rewrite project truth.',
+    metric: '2 memories pending',
+  },
+  {
+    title: 'Run impact analysis',
+    body: 'The graph shows which services, endpoints, and tests are affected by a change.',
+    metric: 'High risk: Auth Service',
+  },
+]
+
+function getOAuthClientId(provider: AuthProvider) {
+  if (provider === 'GitHub') return import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined
+  if (provider === 'Google') return import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
+  return undefined
+}
+
+function scrollToSection(id: string) {
+  window.history.pushState(null, '', `#${id}`)
+  const run = () => {
+    const target = document.getElementById(id)
+    if (!target) return
+
+    const top = target.getBoundingClientRect().top + window.scrollY - 78
+    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+  }
+
+  window.setTimeout(run, 30)
+  window.setTimeout(run, 350)
+  window.setTimeout(run, 900)
+}
+
 function App() {
   const [question, setQuestion] = useState('Why do we use Redis?')
   const [submittedQuestion, setSubmittedQuestion] = useState('Why do we use Redis?')
@@ -147,6 +219,12 @@ function App() {
   const [changes, setChanges] = useState(changeSeed)
   const [selectedChange, setSelectedChange] = useState('PR #226')
   const [activePanel, setActivePanel] = useState('Dashboard')
+  const [authMode, setAuthMode] = useState<AuthMode>('signup')
+  const [authEmail, setAuthEmail] = useState('alex@acme.com')
+  const [authName, setAuthName] = useState('Alex Morgan')
+  const [authPassword, setAuthPassword] = useState('projectmind-demo')
+  const [demoPlaying, setDemoPlaying] = useState(false)
+  const [demoStep, setDemoStep] = useState(0)
   const [activityLog, setActivityLog] = useState<string[]>([
     'Repository acme/platform loaded.',
     'Evidence pack assembled for Redis question.',
@@ -154,6 +232,27 @@ function App() {
 
   const selectedGraphNode = graphNodes.find((node) => node.id === selectedNode) ?? graphNodes[0]
   const selectedChangeRow = changes.find((change) => change.pr === selectedChange) ?? changes[0]
+
+  useEffect(() => {
+    if (!demoPlaying) return
+
+    const timer = window.setInterval(() => {
+      setDemoStep((current) => (current + 1) % demoSteps.length)
+    }, 2400)
+
+    return () => window.clearInterval(timer)
+  }, [demoPlaying])
+
+  useEffect(() => {
+    const hash = window.location.hash
+    if (!hash) return
+
+    const timers = [80, 350, 900].map((delay) => window.setTimeout(() => {
+      document.querySelector(hash)?.scrollIntoView({ block: 'start' })
+    }, delay))
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer))
+  }, [])
 
   const answer = useMemo(() => {
     const lower = submittedQuestion.toLowerCase()
@@ -239,9 +338,52 @@ function App() {
     })
   }
 
-  function connect(provider: string) {
-    setAuthStatus(`Connected with ${provider}`)
-    addLog(`Authentication simulated with ${provider}.`)
+  function connect(provider: AuthProvider) {
+    if (provider === 'email') {
+      const cleanEmail = authEmail.trim().toLowerCase()
+      if (!cleanEmail || authPassword.length < 8) {
+        setAuthStatus('Enter an email and at least 8 characters for password.')
+        return
+      }
+
+      const account = { name: authName.trim() || cleanEmail, email: cleanEmail, signedInAt: new Date().toISOString() }
+      window.localStorage.setItem('projectmind-user', JSON.stringify(account))
+      setAuthStatus(`${authMode === 'signup' ? 'Signed up' : 'Signed in'} as ${account.email}`)
+      addLog(`${authMode === 'signup' ? 'Created' : 'Opened'} email session for ${account.email}.`)
+      return
+    }
+
+    const clientId = getOAuthClientId(provider)
+    if (!clientId) {
+      setAuthStatus(`${provider} OAuth needs ${provider === 'GitHub' ? 'VITE_GITHUB_CLIENT_ID' : 'VITE_GOOGLE_CLIENT_ID'} in .env.local.`)
+      addLog(`${provider} OAuth setup required before redirect.`)
+      return
+    }
+
+    const redirectUri = `${window.location.origin}/auth/${provider.toLowerCase()}/callback`
+    const state = crypto.randomUUID()
+    window.sessionStorage.setItem(`projectmind-${provider.toLowerCase()}-oauth-state`, state)
+
+    if (provider === 'GitHub') {
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        scope: 'read:user user:email repo',
+        state,
+      })
+      window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`
+      return
+    }
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      state,
+      prompt: 'select_account',
+    })
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
   }
 
   function reviewSelectedChange() {
@@ -295,6 +437,14 @@ function App() {
       <AuthAndOnboarding
         authStatus={authStatus}
         connect={connect}
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        authEmail={authEmail}
+        setAuthEmail={setAuthEmail}
+        authName={authName}
+        setAuthName={setAuthName}
+        authPassword={authPassword}
+        setAuthPassword={setAuthPassword}
         indexProgress={indexProgress}
         advanceIndexing={advanceIndexing}
         changes={changes}
@@ -302,6 +452,13 @@ function App() {
         setSelectedChange={setSelectedChange}
         selectedChangeRow={selectedChangeRow}
         reviewSelectedChange={reviewSelectedChange}
+      />
+      <DocsSection />
+      <DemoSection
+        demoPlaying={demoPlaying}
+        setDemoPlaying={setDemoPlaying}
+        demoStep={demoStep}
+        setDemoStep={setDemoStep}
       />
       <FooterCta />
     </main>
@@ -335,19 +492,19 @@ function LandingHero({
           <span>ProjectMind</span>
         </a>
         <nav className="site-nav" aria-label="Main navigation">
-          <a href="#features">Features</a>
-          <a href="#docs">Docs</a>
-          <a href="#login">Login</a>
+          <button type="button" onClick={() => scrollToSection('features')}>Features</button>
+          <button type="button" onClick={() => scrollToSection('docs')}>Docs</button>
+          <button type="button" onClick={() => scrollToSection('login')}>Login</button>
         </nav>
         <div className="nav-actions">
-          <a className="button primary" href="#onboarding">
+          <button className="button primary" type="button" onClick={() => scrollToSection('login')}>
             <GitPullRequest size={18} aria-hidden="true" />
             Connect GitHub
-          </a>
-          <a className="button secondary" href="#app">
+          </button>
+          <button className="button secondary" type="button" onClick={() => scrollToSection('demo')}>
             <Play size={16} aria-hidden="true" />
             Watch Demo
-          </a>
+          </button>
         </div>
       </header>
 
@@ -357,14 +514,14 @@ function LandingHero({
           <p className="hero-lede">Persistent engineering memory for developers and AI agents.</p>
           <p className="hero-subline">Ask why, not just what.</p>
           <div className="hero-actions">
-            <a className="button primary large" href="#onboarding">
+            <button className="button primary large" type="button" onClick={() => scrollToSection('login')}>
               <GitPullRequest size={20} aria-hidden="true" />
               Connect GitHub
-            </a>
-            <a className="button secondary large" href="#app">
+            </button>
+            <button className="button secondary large" type="button" onClick={() => scrollToSection('demo')}>
               <Play size={18} aria-hidden="true" />
               Watch Demo
-            </a>
+            </button>
           </div>
           <p className="memory-line">Give your codebase a memory.</p>
         </div>
@@ -581,6 +738,14 @@ function WorkflowSections({ setActivePanel, addLog }: { setActivePanel: (panel: 
 function AuthAndOnboarding({
   authStatus,
   connect,
+  authMode,
+  setAuthMode,
+  authEmail,
+  setAuthEmail,
+  authName,
+  setAuthName,
+  authPassword,
+  setAuthPassword,
   indexProgress,
   advanceIndexing,
   changes,
@@ -590,7 +755,15 @@ function AuthAndOnboarding({
   reviewSelectedChange,
 }: {
   authStatus: string
-  connect: (provider: string) => void
+  connect: (provider: AuthProvider) => void
+  authMode: AuthMode
+  setAuthMode: (mode: AuthMode) => void
+  authEmail: string
+  setAuthEmail: (value: string) => void
+  authName: string
+  setAuthName: (value: string) => void
+  authPassword: string
+  setAuthPassword: (value: string) => void
   indexProgress: number
   advanceIndexing: () => void
   changes: Change[]
@@ -602,19 +775,33 @@ function AuthAndOnboarding({
   return (
     <section className="operations-band" id="onboarding">
       <div className="auth-panel" id="login">
-        <PanelTitle icon={LockKeyhole} title="Authentication" />
+        <PanelTitle icon={LockKeyhole} title={authMode === 'signup' ? 'Create account' : 'Sign in'} />
+        <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button className={authMode === 'signup' ? 'active' : ''} type="button" onClick={() => setAuthMode('signup')}>Signup</button>
+          <button className={authMode === 'signin' ? 'active' : ''} type="button" onClick={() => setAuthMode('signin')}>Signin</button>
+        </div>
         <button className="button primary full" type="button" onClick={() => connect('GitHub')}>
           <GitPullRequest size={18} aria-hidden="true" />
-          Continue with GitHub
+          {authMode === 'signup' ? 'Signup with GitHub' : 'Signin with GitHub'}
         </button>
         <button className="button secondary full" type="button" onClick={() => connect('Google')}>
           <UserRound size={18} aria-hidden="true" />
-          Continue with Google
+          {authMode === 'signup' ? 'Signup with Google' : 'Signin with Google'}
         </button>
-        <button className="button secondary full" type="button" onClick={() => connect('email')}>
-          <KeyRound size={18} aria-hidden="true" />
-          Continue with email
-        </button>
+        <form className="auth-form" onSubmit={(event) => {
+          event.preventDefault()
+          connect('email')
+        }}>
+          {authMode === 'signup' ? (
+            <input value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder="Full name" />
+          ) : null}
+          <input value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="Email" type="email" />
+          <input value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Password" type="password" />
+          <button className="button secondary full" type="submit">
+            <KeyRound size={18} aria-hidden="true" />
+            {authMode === 'signup' ? 'Create email account' : 'Signin with email'}
+          </button>
+        </form>
         <p>Status: {authStatus}</p>
       </div>
 
@@ -623,9 +810,104 @@ function AuthAndOnboarding({
         <IngestList indexProgress={indexProgress} />
       </div>
 
-      <div className="changes-panel" id="docs">
+      <div className="changes-panel">
         <PanelTitle icon={BookOpen} title="Change intelligence" action={selectedChangeRow.reviewed ? 'Reviewed' : 'Review'} onAction={reviewSelectedChange} />
         <ChangeTable changes={changes} selectedChange={selectedChange} setSelectedChange={setSelectedChange} />
+      </div>
+    </section>
+  )
+}
+
+function DocsSection() {
+  return (
+    <section className="docs-section" id="docs">
+      <div className="section-heading">
+        <h2>Docs: what ProjectMind can do.</h2>
+        <p>
+          This documentation section lists the working product capabilities in
+          the prototype and the production integration points needed for a full SaaS launch.
+        </p>
+      </div>
+      <div className="docs-layout">
+        <aside className="docs-nav" aria-label="Docs contents">
+          {docsFeatures.map(([title]) => <a href={`#doc-${title.toLowerCase().replaceAll(' ', '-')}`} key={title}>{title}</a>)}
+        </aside>
+        <div className="docs-content">
+          {docsFeatures.map(([title, body]) => (
+            <article className="doc-row" id={`doc-${title.toLowerCase().replaceAll(' ', '-')}`} key={title}>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+          <article className="doc-row setup">
+            <h3>OAuth setup</h3>
+            <p>
+              To make the GitHub and Google buttons redirect to real providers, add
+              <code>VITE_GITHUB_CLIENT_ID</code> and <code>VITE_GOOGLE_CLIENT_ID</code>
+              to <code>.env.local</code>. A production app also needs a backend callback
+              to exchange OAuth codes for secure sessions.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function DemoSection({
+  demoPlaying,
+  setDemoPlaying,
+  demoStep,
+  setDemoStep,
+}: {
+  demoPlaying: boolean
+  setDemoPlaying: (playing: boolean) => void
+  demoStep: number
+  setDemoStep: (step: number) => void
+}) {
+  const current = demoSteps[demoStep]
+
+  return (
+    <section className="demo-section" id="demo">
+      <div className="section-heading">
+        <h2>Watch Demo</h2>
+        <p>A live in-browser demo video showing the ProjectMind workflow from repository connection to impact analysis.</p>
+      </div>
+      <div className="demo-player" aria-label="Live ProjectMind demo video">
+        <div className="demo-stage">
+          <div className="demo-video-bar">
+            <span>ProjectMind live demo</span>
+            <strong>{String(demoStep + 1).padStart(2, '0')} / {String(demoSteps.length).padStart(2, '0')}</strong>
+          </div>
+          <div className="demo-frame">
+            <div className="demo-sidebar">
+              {demoSteps.map((step, index) => (
+                <button className={index === demoStep ? 'active' : ''} type="button" key={step.title} onClick={() => setDemoStep(index)}>
+                  {index + 1}. {step.title}
+                </button>
+              ))}
+            </div>
+            <div className="demo-scene">
+              <Sparkles size={24} aria-hidden="true" />
+              <h3>{current.title}</h3>
+              <p>{current.body}</p>
+              <div className="demo-metric">{current.metric}</div>
+              <div className="demo-progress">
+                {demoSteps.map((step, index) => <i className={index <= demoStep ? 'active' : ''} key={step.title} />)}
+              </div>
+            </div>
+          </div>
+          <div className="demo-controls">
+            <button className="button primary" type="button" onClick={() => setDemoPlaying(!demoPlaying)}>
+              {demoPlaying ? <Pause size={17} aria-hidden="true" /> : <Play size={17} aria-hidden="true" />}
+              {demoPlaying ? 'Pause demo' : 'Play demo'}
+            </button>
+            <button className="button secondary" type="button" onClick={() => setDemoStep((demoStep + 1) % demoSteps.length)}>
+              Next scene
+              <ArrowRight size={16} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   )
@@ -638,10 +920,10 @@ function FooterCta() {
         <h2>Give your codebase a memory.</h2>
         <p>Turn PRs, issues, commits, decisions, bugs, and architecture into an auditable engineering brain.</p>
       </div>
-      <a className="button primary large" href="#top">
+      <button className="button primary large" type="button" onClick={() => scrollToSection('login')}>
         <GitPullRequest size={20} aria-hidden="true" />
         Connect GitHub
-      </a>
+      </button>
     </footer>
   )
 }
