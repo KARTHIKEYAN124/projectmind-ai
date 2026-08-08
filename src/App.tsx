@@ -90,7 +90,7 @@ function App() {
   const [repoIndex, setRepoIndex] = useState<RepoIndex | null>(null)
   const [connectStatus, setConnectStatus] = useState('Paste a public GitHub repository URL to begin.')
   const [isIndexing, setIsIndexing] = useState(false)
-  const [question, setQuestion] = useState('What does this repository do?')
+  const [question, setQuestion] = useState('summarize this repository')
   const [answer, setAnswer] = useState('Connect and index a repository, then ask a question.')
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [memories, setMemories] = useState<Evidence[]>(initialMemories)
@@ -338,7 +338,7 @@ function HomePage({ go }: { go: (page: Page) => void }) {
         <div className="hero-copy">
           <h1>Your codebase remembers every decision.</h1>
           <p className="hero-lede">Connect a GitHub repository, index its code and history, then ask questions grounded in real evidence.</p>
-          <p className="hero-subline">Ask why, not just what.</p>
+          <p className="hero-subline">No signup required for public repo analysis. Ask why, not just what.</p>
           <div className="hero-actions">
             <button className="button primary large" type="button" onClick={() => go('app')}>
               <GitPullRequest size={20} />
@@ -596,7 +596,7 @@ function WorkspacePage({
         <header className="workspace-header">
           <div>
             <h2>Repository Workspace</h2>
-            <p>{repoIndex ? `Indexed ${repoIndex.owner}/${repoIndex.repo} on ${repoIndex.branch}` : 'Connect a public GitHub repository to begin.'}</p>
+            <p>{repoIndex ? `Indexed ${repoIndex.owner}/${repoIndex.repo} on ${repoIndex.branch}` : 'Connect a public GitHub repository to begin. Login is optional.'}</p>
           </div>
         </header>
 
@@ -750,9 +750,13 @@ async function buildRepoIndex(owner: string, repo: string): Promise<RepoIndex> {
 }
 
 function answerFromIndex(question: string, index: RepoIndex, memories: Evidence[]) {
+  if (isSummaryQuestion(question)) {
+    return summarizeRepository(index, memories)
+  }
+
   const terms = tokenize(question)
   const scoredFiles = index.files
-    .map((file) => ({ file, score: scoreText(`${file.path}\n${file.text}`, terms) + (isDocFile(file.path) ? 2 : 0) }))
+    .map((file) => ({ file, score: scoreText(`${file.path}\n${file.text}`, terms) + (isDocFile(file.path) ? 3 : 0) + pathIntentBoost(file.path, question) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 5)
@@ -801,6 +805,35 @@ function answerFromIndex(question: string, index: RepoIndex, memories: Evidence[
   return { answer, evidence }
 }
 
+function summarizeRepository(index: RepoIndex, memories: Evidence[]) {
+  const readme = findReadme(index.files)
+  const packageFile = index.files.find((file) => /(^|\/)package\.json$/i.test(file.path))
+  const pyProject = index.files.find((file) => /(^|\/)(pyproject\.toml|requirements\.txt)$/i.test(file.path))
+  const docs = index.files.filter((file) => isDocFile(file.path) && file.path !== readme?.path).slice(0, 4)
+  const sourceFiles = index.files.filter((file) => !isDocFile(file.path)).slice(0, 8)
+  const topDirs = summarizeTopDirs(index.files)
+  const languages = summarizeLanguages(index.files)
+  const readmeSummary = readme ? stripTrailingPeriod(extractReadableSummary(readme.text)) : ''
+  const keyFiles = uniqueFiles([...(readme ? [readme] : []), ...(packageFile ? [packageFile] : []), ...(pyProject ? [pyProject] : []), ...docs, ...sourceFiles]).slice(0, 6)
+
+  const answer = [
+    `${index.owner}/${index.repo} appears to be ${readmeSummary || 'a software project whose purpose is inferred from its indexed files and repository structure'}.`,
+    topDirs ? `The main areas of the repo are ${topDirs}.` : '',
+    languages ? `The indexed codebase is mostly ${languages}.` : '',
+    index.commits.length ? `Recent history includes: ${index.commits.slice(0, 3).map((commit) => commit.message).join('; ')}.` : '',
+    memories.length ? `There are ${memories.length} reviewed project memor${memories.length === 1 ? 'y' : 'ies'} available for follow-up questions.` : '',
+  ].filter(Boolean).join(' ')
+
+  const evidence: Evidence[] = keyFiles.map((file, indexPosition) => ({
+    title: file.path,
+    kind: isDocFile(file.path) ? 'doc_or_readme' : 'code',
+    confidence: `${Math.max(72, 94 - indexPosition * 5)}%`,
+    detail: summarizeFileForEvidence(file),
+  }))
+
+  return { answer, evidence }
+}
+
 function analyzeImpact(file: RepoFile, files: RepoFile[]) {
   const directory = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''
   const base = file.path.split('/').pop()?.replace(/\.[^.]+$/, '').toLowerCase() ?? ''
@@ -841,22 +874,26 @@ function detectIntent(question: string) {
 
 function summarizeFileMatch(file: RepoFile, terms: string[]) {
   const lines = file.text.split('\n')
-  const found = lines.find((line) => terms.some((term) => line.toLowerCase().includes(term)))
-  if (found) return found.trim().slice(0, 240)
-  return `${file.path} matched by path or repository context. Size: ${file.size} bytes.`
+  const found = lines.find((line) => {
+    const clean = line.trim()
+    return clean.length > 20 && terms.some((term) => clean.toLowerCase().includes(term))
+  })
+  if (found) return found.trim().replace(/^#+\s*/, '').slice(0, 280)
+  return summarizeFileForEvidence(file)
 }
 
 function scoreText(text: string, terms: string[]) {
+  if (terms.length === 0) return 0
   const lower = text.toLowerCase()
   return terms.reduce((score, term) => score + (lower.includes(term) ? 1 : 0), 0)
 }
 
 function tokenize(text: string) {
-  return text.toLowerCase().split(/[^a-z0-9_./-]+/).filter((term) => term.length > 2 && !['what', 'why', 'how', 'the', 'and', 'for', 'this', 'that', 'does', 'with', 'from'].includes(term)).slice(0, 12)
+  return text.toLowerCase().split(/[^a-z0-9_./-]+/).filter((term) => term.length > 2 && !['what', 'why', 'how', 'the', 'and', 'for', 'this', 'that', 'does', 'with', 'from', 'summarize', 'summary', 'overview', 'repo', 'repository'].includes(term)).slice(0, 12)
 }
 
 function isDocFile(path: string) {
-  return /(^|\/)(readme|docs?|adr|architecture|changelog)|\.(md|mdx|txt|rst)$/i.test(path)
+  return /(^|\/)(readme|docs?|adr|architecture|changelog)(\/|\.|$)|\.(md|mdx|txt|rst)$/i.test(path)
 }
 
 function isIndexableFile(path: string) {
@@ -866,6 +903,104 @@ function isIndexableFile(path: string) {
 
 function estimateSymbols(files: RepoFile[]) {
   return files.reduce((total, file) => total + (file.text.match(/\b(function|class|const|let|var|def|interface|type|enum|struct)\b/g)?.length ?? 0), 0)
+}
+
+function isSummaryQuestion(question: string) {
+  return /\b(summarize|summary|overview|what does this repo|what does this repository|what is this repo|explain repo|explain repository)\b/i.test(question)
+}
+
+function findReadme(files: RepoFile[]) {
+  return files.find((file) => /(^|\/)readme\.(md|mdx|txt|rst)$/i.test(file.path))
+}
+
+function uniqueFiles(files: RepoFile[]) {
+  const seen = new Set<string>()
+  return files.filter((file) => {
+    if (seen.has(file.path)) return false
+    seen.add(file.path)
+    return true
+  })
+}
+
+function stripTrailingPeriod(text: string) {
+  return text.replace(/[.\s]+$/, '')
+}
+
+function extractReadableSummary(text: string) {
+  const withoutCode = text.replace(/```[\s\S]*?```/g, ' ')
+  const lines = withoutCode.split('\n').map((line) => line.trim()).filter(Boolean)
+  const headingIndex = lines.findIndex((line) => /^#\s+/.test(line))
+  const title = headingIndex >= 0 ? lines[headingIndex].replace(/^#+\s*/, '') : ''
+  const paragraph = lines.find((line, index) => {
+    if (index === headingIndex) return false
+    return !line.startsWith('#') && !line.startsWith('![') && !line.startsWith('|') && !line.startsWith('- ') && !line.startsWith('* ') && line.length > 60
+  })
+
+  if (title && paragraph) return `${title}: ${paragraph.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').slice(0, 260)}`
+  if (title) return title
+  if (paragraph) return paragraph.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').slice(0, 260)
+  return ''
+}
+
+function summarizeFileForEvidence(file: RepoFile) {
+  if (/package\.json$/i.test(file.path)) {
+    try {
+      const parsed = JSON.parse(file.text) as { name?: string; scripts?: Record<string, string>; dependencies?: Record<string, string> }
+      const deps = Object.keys(parsed.dependencies ?? {}).slice(0, 5)
+      const scripts = Object.keys(parsed.scripts ?? {}).slice(0, 5)
+      return [`Package ${parsed.name ?? file.path}.`, deps.length ? `Dependencies: ${deps.join(', ')}.` : '', scripts.length ? `Scripts: ${scripts.join(', ')}.` : ''].filter(Boolean).join(' ')
+    } catch {
+      return 'Package manifest matched, but could not parse JSON.'
+    }
+  }
+
+  const summary = extractReadableSummary(file.text)
+  if (summary) return summary
+
+  const meaningful = file.text.split('\n').map((line) => line.trim()).find((line) => line.length > 35 && !line.startsWith('//') && !line.startsWith('*') && !line.startsWith('{') && !line.startsWith('import '))
+  return meaningful ? meaningful.slice(0, 280) : `${file.path} is an indexed file (${file.size} bytes).`
+}
+
+function summarizeTopDirs(files: RepoFile[]) {
+  const counts = new Map<string, number>()
+  for (const file of files) {
+    const dir = file.path.includes('/') ? file.path.split('/')[0] : '(root)'
+    counts.set(dir, (counts.get(dir) ?? 0) + 1)
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([dir, count]) => `${dir} (${count})`).join(', ')
+}
+
+function summarizeLanguages(files: RepoFile[]) {
+  const names = new Map([
+    ['.ts', 'TypeScript'],
+    ['.tsx', 'React/TypeScript'],
+    ['.js', 'JavaScript'],
+    ['.jsx', 'React/JavaScript'],
+    ['.py', 'Python'],
+    ['.go', 'Go'],
+    ['.rs', 'Rust'],
+    ['.java', 'Java'],
+    ['.md', 'Markdown/docs'],
+  ])
+  const counts = new Map<string, number>()
+  for (const file of files) {
+    const ext = file.path.match(/\.[^.]+$/)?.[0].toLowerCase()
+    const name = ext ? names.get(ext) : undefined
+    if (name) counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, count]) => `${name} (${count})`).join(', ')
+}
+
+function pathIntentBoost(path: string, question: string) {
+  const lower = question.toLowerCase()
+  const pathLower = path.toLowerCase()
+  let boost = 0
+  if (lower.includes('api') && pathLower.includes('/api/')) boost += 4
+  if ((lower.includes('schema') || lower.includes('model')) && /schema|model|types?/.test(pathLower)) boost += 4
+  if ((lower.includes('parse') || lower.includes('parser')) && pathLower.includes('parser')) boost += 4
+  if ((lower.includes('pipeline') || lower.includes('workflow')) && pathLower.includes('pipeline')) boost += 4
+  if ((lower.includes('setup') || lower.includes('run') || lower.includes('install')) && /readme|package|requirements|pyproject|docker/i.test(path)) boost += 4
+  return boost
 }
 
 export default App
