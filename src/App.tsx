@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   ArrowRight,
+  Bot,
   BookOpen,
   BrainCircuit,
   FileCode2,
@@ -14,6 +15,7 @@ import {
   Pause,
   Play,
   Search,
+  Send,
   Sparkles,
   UserRound,
 } from 'lucide-react'
@@ -44,6 +46,13 @@ type Evidence = {
   detail: string
 }
 
+type ChatMessage = {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  evidence?: Evidence[]
+}
+
 type RepoIndex = {
   owner: string
   repo: string
@@ -65,9 +74,10 @@ const featureList = [
   ['Repository connection', 'Connect public GitHub repositories directly in the browser; OAuth launch is ready when client IDs are configured.'],
   ['Code and history indexing', 'Fetch files, README/docs, package metadata, source files, and recent commit history.'],
   ['Ask repository', 'Questions are answered from ranked repository evidence rather than a fixed demo response.'],
+  ['AI chatbot fallback', 'Chat in the workspace without an API key; it uses indexed repo evidence first and public web summaries when the browser can fetch them.'],
   ['Memory review', 'Promote useful answers into approved project memories with source citations.'],
   ['Impact analysis', 'Estimate change risk from selected files, imports, related paths, and test coverage hints.'],
-  ['Separate product pages', 'Features, Docs, Login, and Watch Demo now open as distinct app pages.'],
+  ['Separate product pages', 'Features, Docs, Login, and Watch Demo open as distinct app pages.'],
 ]
 
 const initialMemories: Evidence[] = [
@@ -99,6 +109,15 @@ function App() {
   const [demoPlaying, setDemoPlaying] = useState(false)
   const [demoStep, setDemoStep] = useState(0)
   const [activityLog, setActivityLog] = useState<string[]>(['ProjectMind ready.'])
+  const [chatInput, setChatInput] = useState('What does this project do?')
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: 1,
+      role: 'assistant',
+      content: 'Ask me about a connected repository, or ask a general engineering question. This frontend fallback uses the indexed GitHub data first and public web summaries when they are available.',
+    },
+  ])
+  const [chatBusy, setChatBusy] = useState(false)
 
   useEffect(() => {
     const hash = window.location.hash.replace('#', '') as Page
@@ -229,6 +248,35 @@ function App() {
     log(`Answered from repository index: ${question}`)
   }
 
+  async function sendChatMessage(event: FormEvent) {
+    event.preventDefault()
+    const prompt = chatInput.trim()
+    if (!prompt || chatBusy) return
+
+    const userMessage: ChatMessage = { id: Date.now(), role: 'user', content: prompt }
+    setChatMessages((current) => [...current, userMessage])
+    setChatInput('')
+    setChatBusy(true)
+    setActiveStep('ask')
+
+    try {
+      const repoResult = repoIndex ? answerFromIndex(prompt, repoIndex, memories) : null
+      const shouldUseWeb = !repoResult || isGeneralKnowledgeQuestion(prompt) || repoResult.answer.includes('did not find strong evidence')
+      const webResult = shouldUseWeb ? await fetchPublicWebContext(prompt) : null
+      const combined = composeChatAnswer(prompt, repoResult, webResult, repoIndex)
+      setChatMessages((current) => [...current, { id: Date.now() + 1, role: 'assistant', content: combined.answer, evidence: combined.evidence }])
+      setAnswer(combined.answer)
+      setEvidence(combined.evidence)
+      log(`Chat answered: ${prompt}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The browser fallback could not answer that question.'
+      setChatMessages((current) => [...current, { id: Date.now() + 1, role: 'assistant', content: message }])
+      log(`Chat failed: ${message}`)
+    } finally {
+      setChatBusy(false)
+    }
+  }
+
   function approveMemory() {
     if (!answer || evidence.length === 0) return
     const memory = {
@@ -297,6 +345,11 @@ function App() {
           runImpact={runImpact}
           impact={impact}
           activityLog={activityLog}
+          chatMessages={chatMessages}
+          chatInput={chatInput}
+          setChatInput={setChatInput}
+          sendChatMessage={sendChatMessage}
+          chatBusy={chatBusy}
         />
       ) : null}
     </main>
@@ -396,6 +449,7 @@ function DocsPage() {
       <div className="docs-layout">
         <aside className="docs-nav">
           {demoSteps.map(([title]) => <a href={`#${title.toLowerCase().replaceAll(' ', '-')}`} key={title}>{title}</a>)}
+          <a href="#ai-chatbot">AI chatbot</a>
           <a href="#oauth">OAuth setup</a>
         </aside>
         <div className="docs-content">
@@ -405,6 +459,13 @@ function DocsPage() {
               <p>{body}</p>
             </article>
           ))}
+          <article className="doc-row" id="ai-chatbot">
+            <h3>AI chatbot</h3>
+            <p>
+              The workspace chatbot is a frontend fallback that does not require an API key. It answers from the indexed GitHub files,
+              commits, and approved memories first. For general concepts, it can add public browser-readable web summaries as supporting context.
+            </p>
+          </article>
           <article className="doc-row setup" id="oauth">
             <h3>OAuth setup</h3>
             <p>
@@ -552,6 +613,11 @@ function WorkspacePage({
   runImpact,
   impact,
   activityLog,
+  chatMessages,
+  chatInput,
+  setChatInput,
+  sendChatMessage,
+  chatBusy,
 }: {
   activeStep: WorkflowStep
   repoUrl: string
@@ -573,6 +639,11 @@ function WorkspacePage({
   runImpact: () => void
   impact: ReturnType<typeof analyzeImpact> | null
   activityLog: string[]
+  chatMessages: ChatMessage[]
+  chatInput: string
+  setChatInput: (value: string) => void
+  sendChatMessage: (event: FormEvent) => void
+  chatBusy: boolean
 }) {
   return (
     <section className="app-frame app-frame-live">
@@ -631,6 +702,25 @@ function WorkspacePage({
               <p>{answer}</p>
               <EvidenceList evidence={evidence} />
             </div>
+          </section>
+
+          <section className="panel chatbot-panel">
+            <PanelTitle icon={Bot} title="AI chatbot" />
+            <div className="chat-window" aria-live="polite">
+              {chatMessages.map((message) => (
+                <article className={`chat-message ${message.role}`} key={message.id}>
+                  <strong>{message.role === 'user' ? 'You' : 'ProjectMind AI'}</strong>
+                  <p>{message.content}</p>
+                  {message.evidence ? <EvidenceList evidence={message.evidence.slice(0, 4)} /> : null}
+                </article>
+              ))}
+              {chatBusy ? <article className="chat-message assistant"><strong>ProjectMind AI</strong><p>Thinking through repository evidence and public web context...</p></article> : null}
+            </div>
+            <form className="chat-form" onSubmit={sendChatMessage}>
+              <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Ask about the repo, architecture, dependencies, setup, or a general concept" />
+              <button type="submit" disabled={chatBusy}><Send size={15} /></button>
+            </form>
+            <p className="chat-note">Frontend fallback: no API key required. It uses indexed GitHub files first, then public browser-readable web summaries.</p>
           </section>
 
           <section className="panel memory-panel">
@@ -803,6 +893,99 @@ function answerFromIndex(question: string, index: RepoIndex, memories: Evidence[
   ].filter(Boolean).join(' ')
 
   return { answer, evidence }
+}
+
+async function fetchPublicWebContext(question: string) {
+  const topic = deriveWebTopic(question)
+  if (!topic) return null
+
+  const response = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topic)}`, {
+    headers: { accept: 'application/json' },
+  })
+  if (!response.ok) return null
+
+  const data = await response.json() as {
+    title?: string
+    extract?: string
+    content_urls?: { desktop?: { page?: string } }
+  }
+  if (!data.extract || data.extract.length < 40) return null
+
+  return {
+    answer: data.extract,
+    evidence: {
+      title: data.title ?? topic,
+      kind: 'public_web',
+      confidence: '70%',
+      detail: `${data.extract.slice(0, 260)}${data.content_urls?.desktop?.page ? ` Source: ${data.content_urls.desktop.page}` : ''}`,
+    } satisfies Evidence,
+  }
+}
+
+function composeChatAnswer(
+  question: string,
+  repoResult: ReturnType<typeof answerFromIndex> | null,
+  webResult: Awaited<ReturnType<typeof fetchPublicWebContext>>,
+  index: RepoIndex | null,
+) {
+  const repoHadWeakMatch = repoResult?.answer.includes('did not find strong evidence') ?? false
+  const evidence = [...(repoResult?.evidence ?? []), ...(webResult ? [webResult.evidence] : [])].slice(0, 6)
+
+  if (repoResult && !repoHadWeakMatch && webResult && isGeneralKnowledgeQuestion(question)) {
+    return {
+      answer: `${repoResult.answer} Public web context: ${webResult.answer}`,
+      evidence,
+    }
+  }
+
+  if (repoResult && !repoHadWeakMatch) {
+    return {
+      answer: `${repoResult.answer} This answer is grounded in the indexed repository data.`,
+      evidence,
+    }
+  }
+
+  if (webResult && index) {
+    return {
+      answer: `I did not find strong repository-specific evidence in ${index.owner}/${index.repo}, so I used public web context for the concept: ${webResult.answer}`,
+      evidence,
+    }
+  }
+
+  if (webResult) {
+    return {
+      answer: `No repository is indexed yet, so I used public web context: ${webResult.answer}`,
+      evidence: [webResult.evidence],
+    }
+  }
+
+  return {
+    answer: index
+      ? `I could not find enough indexed repository evidence or public web context for "${question}". Try asking about a specific file, dependency, function, setup step, or architecture term.`
+      : `Connect a public GitHub repository for repo-specific answers, or ask a more specific general engineering question.`,
+    evidence: repoResult?.evidence ?? [],
+  }
+}
+
+function isGeneralKnowledgeQuestion(question: string) {
+  return /\b(what is|what are|define|explain|meaning of|internet|web|general|concept|architecture|framework|database|oauth|api|saas|cloud)\b/i.test(question)
+}
+
+function deriveWebTopic(question: string) {
+  const cleaned = question
+    .toLowerCase()
+    .replace(/\b(what is|what are|define|explain|meaning of|tell me about|summarize|summary|repo|repository|project|codebase|please|based on|internet|web|from)\b/g, ' ')
+    .replace(/[^a-z0-9+#.\s-]/g, ' ')
+    .split(/\s+/)
+    .filter((term) => term.length > 1 && !['the', 'and', 'for', 'with', 'this', 'that', 'how', 'why', 'does', 'can', 'you'].includes(term))
+    .slice(0, 5)
+    .join(' ')
+    .trim()
+
+  if (!cleaned && /\barchitecture\b/i.test(question)) return 'software architecture'
+  if (cleaned === 'architecture') return 'software architecture'
+  if (cleaned === 'oauth') return 'oauth'
+  return cleaned
 }
 
 function summarizeRepository(index: RepoIndex, memories: Evidence[]) {

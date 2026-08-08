@@ -315,7 +315,8 @@
 }
 
 .ask-form,
-.memory-form {
+.memory-form,
+.chat-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
   gap: 8px;
@@ -323,7 +324,8 @@
 }
 
 .ask-form input,
-.memory-form input {
+.memory-form input,
+.chat-form input {
   min-width: 0;
   min-height: 42px;
   border: 1px solid var(--border);
@@ -336,6 +338,7 @@
 
 .ask-form button,
 .memory-form button,
+.chat-form button,
 .row-actions button {
   min-height: 42px;
   border: 1px solid var(--border-strong);
@@ -576,6 +579,73 @@
 
 .answer-block {
   text-align: left;
+}
+
+.chatbot-panel {
+  grid-column: 1 / -1;
+}
+
+.chat-window {
+  min-height: 260px;
+  max-height: 420px;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.chat-message {
+  width: min(760px, 100%);
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: white;
+}
+
+.chat-message.user {
+  justify-self: end;
+  width: min(620px, 88%);
+  background: #eaf8f5;
+  border-color: rgba(14, 129, 116, 0.2);
+}
+
+.chat-message.assistant {
+  justify-self: start;
+}
+
+.chat-message strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.chat-message p {
+  margin: 0;
+  color: #3e4b5d;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.chat-form {
+  grid-template-columns: minmax(0, 1fr) 46px;
+  margin-bottom: 8px;
+}
+
+.chat-form button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.chat-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .answer-block h4 {
