@@ -263,7 +263,14 @@ function App() {
       const repoResult = repoIndex ? answerFromIndex(prompt, repoIndex, memories) : null
       const shouldUseWeb = !repoResult || isGeneralKnowledgeQuestion(prompt) || repoResult.answer.includes('did not find strong evidence')
       const webResult = shouldUseWeb ? await fetchPublicWebContext(prompt) : null
-      const combined = composeChatAnswer(prompt, repoResult, webResult, repoIndex)
+      const localCombined = composeChatAnswer(prompt, repoResult, webResult, repoIndex)
+      const aiResult = await askConfiguredLlm(prompt, localCombined.evidence, repoIndex)
+      const combined = aiResult
+        ? {
+            answer: `${aiResult.answer}\n\nModel: ${aiResult.model}. Provider: ${aiResult.provider}.`,
+            evidence: localCombined.evidence,
+          }
+        : localCombined
       setChatMessages((current) => [...current, { id: Date.now() + 1, role: 'assistant', content: combined.answer, evidence: combined.evidence }])
       setAnswer(combined.answer)
       setEvidence(combined.evidence)
@@ -919,6 +926,30 @@ async function fetchPublicWebContext(question: string) {
       confidence: '70%',
       detail: `${data.extract.slice(0, 260)}${data.content_urls?.desktop?.page ? ` Source: ${data.content_urls.desktop.page}` : ''}`,
     } satisfies Evidence,
+  }
+}
+
+async function askConfiguredLlm(question: string, evidence: Evidence[], index: RepoIndex | null) {
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        evidence,
+        repo: index ? { owner: index.owner, repo: index.repo, branch: index.branch } : null,
+      }),
+    })
+    if (!response.ok) return null
+    const data = await response.json() as { answer?: string; model?: string; provider?: string }
+    if (!data.answer) return null
+    return {
+      answer: data.answer,
+      model: data.model ?? 'configured model',
+      provider: data.provider ?? 'configured provider',
+    }
+  } catch {
+    return null
   }
 }
 

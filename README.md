@@ -6,21 +6,42 @@ ProjectMind is a frontend prototype for repository memory: connect a public GitH
 
 ```bash
 npm install
+npm run api
 npm run dev
 ```
 
-Open the local URL printed by Vite, usually `http://localhost:5173`.
+Run the API and Vite app in two terminals. Open the local URL printed by Vite, usually `http://localhost:5173`.
+
+## Free LLM Provider
+
+ProjectMind can use any OpenAI-compatible free LLM provider. The default configuration targets Groq because the free LLM directory recommends it as a no-credit-card option and Groq exposes an OpenAI-compatible chat API.
+
+Create `.env.local` from `.env.example`, then add your own provider key:
+
+```env
+FREE_LLM_API_KEY=
+FREE_LLM_BASE_URL=https://api.groq.com/openai/v1
+FREE_LLM_MODEL=llama-3.3-70b-versatile
+```
+
+Get a Groq key from:
+
+```text
+https://console.groq.com/keys
+```
+
+The browser never receives this key. The React app calls the local API route `POST /api/chat`, and the server sends the request to the configured provider. If no key is configured, the workspace chatbot falls back to local repository evidence ranking and public web summaries.
 
 ## OAuth Configuration
 
-Create `.env.local` from `.env.example`:
+The frontend can launch GitHub/Google OAuth. Add these values to `.env.local`:
 
 ```env
 VITE_GITHUB_CLIENT_ID=
 VITE_GOOGLE_CLIENT_ID=
 ```
 
-The frontend can launch GitHub/Google OAuth. A production app still needs backend callback routes to securely exchange OAuth codes and access private repositories.
+A production app still needs backend callback routes to securely exchange OAuth codes and access private repositories.
 
 ## GitHub Pages Hosting
 
