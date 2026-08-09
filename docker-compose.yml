@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: projectmind
+      POSTGRES_USER: projectmind
+      POSTGRES_PASSWORD: projectmind
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    image: node:24-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run api"
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: postgres://projectmind:projectmind@postgres:5432/projectmind
+      REDIS_URL: redis://redis:6379
+      WEB_ORIGIN: http://localhost:5173
+    ports:
+      - "8787:8787"
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    image: node:24-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run worker"
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: postgres://projectmind:projectmind@postgres:5432/projectmind
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  postgres-data:

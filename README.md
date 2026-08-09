@@ -12,6 +12,15 @@ npm run dev
 
 Run the API and Vite app in two terminals. Open the local URL printed by Vite, usually `http://localhost:5173`.
 
+For local infrastructure:
+
+```bash
+docker compose up postgres redis
+npm run api
+npm run worker
+npm run dev
+```
+
 ## Free LLM Provider
 
 ProjectMind can use any OpenAI-compatible free LLM provider. The default configuration targets Groq because the free LLM directory recommends it as a no-credit-card option and Groq exposes an OpenAI-compatible chat API.
@@ -31,6 +40,19 @@ https://console.groq.com/keys
 ```
 
 The browser never receives this key. The React app calls the local API route `POST /api/chat`, and the server sends the request to the configured provider. If no key is configured, the workspace chatbot falls back to local repository evidence ranking and public web summaries.
+
+## Production SaaS Surfaces
+
+The repo includes production architecture surfaces for:
+
+- GitHub App install flow, OAuth callbacks, sessions, private repository connection, and signed webhooks.
+- PostgreSQL with pgvector schema for users, organizations, repositories, symbols, graph edges, PRs, issues, memories, embeddings, answers, jobs, and audit logs.
+- Redis-backed worker architecture contract for indexing, incremental sync, memory extraction, embeddings, and webhook jobs.
+- Memory lifecycle states: active, questionable, superseded, deprecated, invalid.
+- Hybrid retrieval and server-side RAG using the configured free LLM provider.
+- RBAC, audit log, encryption helper, settings API, VS Code extension scaffold, MCP server scaffold, Railway backend config, and Vercel frontend config.
+
+See `docs/requirements-matrix.md` for the exact implementation status of every requested requirement.
 
 ## OAuth Configuration
 

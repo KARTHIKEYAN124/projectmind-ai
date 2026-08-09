@@ -7,6 +7,8 @@
     "api": "node server/index.js",
     "dev": "vite",
     "dev:api": "node server/index.js",
+    "worker": "node server/worker.js",
+    "mcp": "node mcp/server.js",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"

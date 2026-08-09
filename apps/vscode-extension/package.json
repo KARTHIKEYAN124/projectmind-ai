@@ -1,0 +1,37 @@
+{
+  "name": "projectmind-vscode",
+  "displayName": "ProjectMind",
+  "description": "Repository memory, history, and impact analysis inside VS Code.",
+  "version": "0.1.0",
+  "publisher": "projectmind",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "activationEvents": [
+    "onCommand:projectmind.askCurrentFile",
+    "onCommand:projectmind.impactAnalysis"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "projectmind.askCurrentFile",
+        "title": "ProjectMind: Ask About Current File"
+      },
+      {
+        "command": "projectmind.impactAnalysis",
+        "title": "ProjectMind: Run Impact Analysis"
+      }
+    ],
+    "configuration": {
+      "title": "ProjectMind",
+      "properties": {
+        "projectmind.apiBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:8787",
+          "description": "ProjectMind API base URL."
+        }
+      }
+    }
+  }
+}
