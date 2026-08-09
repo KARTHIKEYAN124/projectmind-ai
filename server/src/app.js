@@ -32,6 +32,7 @@ export function createApp(app) {
   })
 
   app.use('/api/auth', authRouter)
+  app.use('/auth', authRouter)
   app.use('/api/github', githubRouter)
   app.use('/api/webhooks', webhookRouter)
   app.use('/api/chat', chatRouter)

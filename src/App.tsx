@@ -180,7 +180,8 @@ function App() {
 
     const state = crypto.randomUUID()
     sessionStorage.setItem(`projectmind-${provider.toLowerCase()}-state`, state)
-    const redirectUri = `${window.location.origin}/auth/${provider.toLowerCase()}/callback`
+    const callbackBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? window.location.origin
+    const redirectUri = `${callbackBaseUrl.replace(/\/$/, '')}/api/auth/${provider.toLowerCase()}/callback`
 
     if (provider === 'GitHub') {
       const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, scope: 'read:user user:email repo', state })
