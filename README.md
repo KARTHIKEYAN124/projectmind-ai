@@ -54,6 +54,8 @@ The repo includes production architecture surfaces for:
 
 See `docs/requirements-matrix.md` for the exact implementation status of every requested requirement.
 
+Credential and deployment setup lives in `docs/production-credentials.md`.
+
 ## OAuth Configuration
 
 The frontend can launch GitHub/Google OAuth. Add these values to `.env.local`:

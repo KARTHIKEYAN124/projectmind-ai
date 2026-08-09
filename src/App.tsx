@@ -931,7 +931,7 @@ async function fetchPublicWebContext(question: string) {
 
 async function askConfiguredLlm(question: string, evidence: Evidence[], index: RepoIndex | null) {
   try {
-    const response = await fetch('/api/chat', {
+    const response = await fetch(apiUrl('/api/chat'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -951,6 +951,12 @@ async function askConfiguredLlm(question: string, evidence: Evidence[], index: R
   } catch {
     return null
   }
+}
+
+function apiUrl(path: string) {
+  const base = import.meta.env.VITE_API_BASE_URL as string | undefined
+  if (!base) return path
+  return `${base.replace(/\/$/, '')}${path}`
 }
 
 function composeChatAnswer(

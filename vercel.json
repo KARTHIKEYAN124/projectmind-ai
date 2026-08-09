@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://PROJECTMIND_API_HOST/api/:path*"
+      "destination": "/api/:path*"
     }
   ]
 }
