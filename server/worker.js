@@ -1,27 +1,40 @@
 import 'dotenv/config'
-import { claimJob, completeJob } from './src/services/queue.js'
-import { planRepositoryIndex } from './src/services/indexer.js'
+import { Worker } from 'bullmq'
+import { claimJob, completeJob, redisConnection } from './src/services/queue.js'
+import { cloneAndIndexRepository, planRepositoryIndex } from './src/services/indexer.js'
 
-console.log('ProjectMind worker started. Configure REDIS_URL for distributed queues in production.')
+console.log('ProjectMind worker started.')
 
-setInterval(() => {
+const connection = redisConnection()
+
+if (connection) {
+  new Worker('projectmind', async (job) => runJob({ type: job.name, payload: job.data }), { connection })
+  console.log('Redis worker connected.')
+} else {
+  console.log('REDIS_URL missing. Using local in-memory worker loop.')
+  setInterval(() => {
   const job = claimJob()
   if (!job) return
+    runJob(job).then((result) => completeJob(job, result)).catch((error) => completeJob(job, { error: error.message }))
+  }, 1500)
+}
 
+async function runJob(job) {
   if (job.type === 'repository.index') {
-    completeJob(job, {
+    if (job.payload.repository?.cloneUrl || job.payload.repository?.url) {
+      return cloneAndIndexRepository(job.payload.repository)
+    }
+    return {
       plan: planRepositoryIndex(job.payload.repository),
-      next: 'Clone repository, parse AST with Tree-sitter, persist symbols, create embeddings, extract memories.',
-    })
-    return
+      next: 'Repository URL missing; cannot clone.',
+    }
   }
 
   if (job.type === 'github.webhook_sync') {
-    completeJob(job, {
+    return {
       next: 'Fetch changed files, reparse incrementally, update graph, generate memories, invalidate stale memories.',
-    })
-    return
+    }
   }
 
-  completeJob(job, { next: 'No worker handler registered yet.' })
-}, 1500)
+  return { next: 'No worker handler registered yet.' }
+}

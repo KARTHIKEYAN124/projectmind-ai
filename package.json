@@ -16,12 +16,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "bullmq": "^6.0.9",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "ioredis": "^6.0.0",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.30.0",
+    "pg": "^8.23.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "simple-git": "^3.36.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

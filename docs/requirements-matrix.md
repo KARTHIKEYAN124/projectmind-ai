@@ -4,18 +4,18 @@ This repo now contains the application surfaces for the requested SaaS architect
 
 | Requirement | Repo status | Files |
 | --- | --- | --- |
-| Real GitHub App install flow | API route and env contract added; requires a real GitHub App slug/private key. | `server/src/routes/github.js`, `.env.example` |
-| Real GitHub OAuth callback and sessions | Callback route and session issuing added; token exchange must be connected to real secrets. | `server/src/routes/auth.js`, `server/src/security/sessions.js` |
-| Google OAuth callback and sessions | Callback route and session issuing added; token exchange must be connected to real secrets. | `server/src/routes/auth.js` |
-| Private repo access | Repository connection API accepts installation IDs/private repos; real installation token exchange required. | `server/src/routes/repositories.js`, `server/src/services/github.js` |
-| Repository cloning | Index job plan and worker contract added; production clone implementation needs GitHub installation token. | `server/src/services/indexer.js`, `server/worker.js` |
+| Real GitHub App install flow | Install route, callback route, App JWT signing, installation token creation, and installation repository listing implemented. Requires real GitHub App credentials. | `server/src/routes/github.js`, `server/src/services/github.js`, `.env.example` |
+| Real GitHub OAuth callback and sessions | Real GitHub code-to-token exchange, user lookup, email lookup, DB upsert, and session issuing implemented. Requires real OAuth credentials. | `server/src/routes/auth.js`, `server/src/services/github.js`, `server/src/security/sessions.js` |
+| Google OAuth callback and sessions | Real Google token exchange, userinfo lookup, DB upsert, and session issuing implemented. Requires real OAuth credentials. | `server/src/routes/auth.js`, `server/src/services/github.js` |
+| Private repo access | Repository connection API creates GitHub installation tokens for private repos and passes tokens to clone/index jobs. Requires installed GitHub App. | `server/src/routes/repositories.js`, `server/src/services/github.js` |
+| Repository cloning | Worker can clone repositories with installation tokens, scan files, extract symbols, persist files/symbols, optionally create embeddings, and ingest history. | `server/src/services/indexer.js`, `server/worker.js` |
 | PostgreSQL database | pgvector schema and Docker Postgres added. | `db/schema.sql`, `docker-compose.yml` |
-| pgvector embeddings | `embeddings` table and vector index added; embedding generation worker is the next implementation step. | `db/schema.sql` |
-| Redis queue | Docker Redis and queue contract added; current local queue is in-memory until Redis client is wired. | `docker-compose.yml`, `server/src/services/queue.js` |
-| Background workers | Worker entry point added. | `server/worker.js` |
+| pgvector embeddings | `embeddings` table/vector index added and indexing worker can call a configured embedding API and persist vectors. Requires embedding provider credentials. | `db/schema.sql`, `server/src/services/indexer.js`, `server/src/services/db.js` |
+| Redis queue | BullMQ/Redis queue implemented with in-memory fallback for local no-Redis mode. | `docker-compose.yml`, `server/src/services/queue.js` |
+| Background workers | Worker processes Redis jobs when `REDIS_URL` exists and local jobs otherwise. | `server/worker.js` |
 | Tree-sitter AST parsing | Parser contract and symbol extraction API added; actual grammar adapters still need installation. | `server/src/services/indexer.js`, `server/src/routes/code.js` |
 | Symbol graph extraction | Graph tables and API route added. | `db/schema.sql`, `server/src/routes/code.js` |
-| PR/issue ingestion | Tables and webhook job path added; GitHub API fetchers need real installation auth. | `db/schema.sql`, `server/src/routes/webhooks.js` |
+| PR/issue ingestion | GitHub commit, PR, and issue fetchers and Postgres persistence implemented. Requires installation token. | `db/schema.sql`, `server/src/services/github.js`, `server/src/services/db.js` |
 | Webhook sync | Signed GitHub webhook route and sync jobs added. | `server/src/routes/webhooks.js` |
 | Real memory extraction pipeline | Memory table, candidate creation, status transitions, and contradiction check added. | `server/src/services/memory.js`, `server/src/routes/memory.js` |
 | Memory lifecycle | Active/questionable/superseded/deprecated/invalid supported. | `db/schema.sql`, `server/src/routes/memory.js` |

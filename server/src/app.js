@@ -14,7 +14,12 @@ import { requireSession } from './security/sessions.js'
 
 export function createApp(app) {
   app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173', credentials: true }))
-  app.use(express.json({ limit: '2mb' }))
+  app.use(express.json({
+    limit: '2mb',
+    verify: (request, _response, buffer) => {
+      request.rawBody = buffer
+    },
+  }))
 
   app.get('/api/health', (_request, response) => {
     response.json({

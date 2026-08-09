@@ -87,6 +87,9 @@ The default provider is Groq because it exposes an OpenAI-compatible API:
 FREE_LLM_API_KEY=
 FREE_LLM_BASE_URL=https://api.groq.com/openai/v1
 FREE_LLM_MODEL=llama-3.3-70b-versatile
+EMBEDDING_API_KEY=
+EMBEDDING_BASE_URL=
+EMBEDDING_MODEL=
 ```
 
 Get your own key from:
